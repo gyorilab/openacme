@@ -29,6 +29,23 @@ ICD10_BASE = OPENACME_BASE.module('icd10')
 ICD10_XML_URL = "https://icdcdn.who.int/icd10/claml/icd102019en.xml.zip"
 
 
+def expand_icd10_range(g, start, end):
+    # Return a list of all codes between e.g.,
+    # ('Y43.1', 'Y43.4') or ('C00.0', 'C97')
+    codes = sorted(g.nodes)
+    in_range = []
+    in_range_flag = False
+    end_is_super_class = ('.' not in end)
+    for code in codes:
+        if code == start:
+            in_range_flag = True
+        if in_range_flag:
+            in_range.append(code)
+        if code == end or (end_is_super_class and code.startswith(end)):
+            break
+    return in_range
+
+
 def get_icd10_graph():
     zip_path = ICD10_BASE.ensure(url=ICD10_XML_URL)
 
