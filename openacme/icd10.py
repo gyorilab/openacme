@@ -9,7 +9,7 @@ The text files have the key structure but don't contain as much
 additional detail as the XML, notably inclusion and exclusion
 criteria seem to be included only in the XML.
 
-The structure of ICD-10 consistes of chapters (roman numberals),
+The structure of ICD-10 consists of chapters (roman numerals),
 under which are blocks (alphanumeric ranges), and under blocks
 are categories (alphanumeric codes) and there are sub-categories
 with decimal points. For example:
