@@ -30,14 +30,38 @@ SOURCE_PRIORITY = ["MSH", "CSP", "NCI", "HPO", "SNOMEDCT_US", "MEDLINEPLUS"]
 
 
 def is_valid_diagnosis_code(code):
-    """Check if code is a valid diagnosis code."""
+    """Check if code is a valid ICD-10 diagnosis code.
+
+    Parameters
+    ----------
+    code : str
+        ICD-10 code to validate.
+
+    Returns
+    -------
+    bool
+        True if code is a valid diagnosis code, False otherwise.
+    """
     if len(code) <= 2 or "-" in code or code.endswith(":"):
         return False
     return bool(re.match(r"^[A-Z]\d{2}(\.\d+)?$", code))
 
 
 def extract_icd10_codes(icd10_zip_path, verbose=True):
-    """Extract ICD-10 codes from XML zip file."""
+    """Extract ICD-10 codes from XML zip file.
+
+    Parameters
+    ----------
+    icd10_zip_path : str
+        Path to ICD-10 XML zip file.
+    verbose : bool, optional
+        Whether to print progress messages. Defaults to True.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping ICD-10 codes to their names.
+    """
     if verbose:
         print("Extracting ICD-10 codes from XML...")
 
@@ -71,7 +95,22 @@ def extract_icd10_codes(icd10_zip_path, verbose=True):
 
 
 def collect_strings_from_mrconso(mrconso_path, valid_codes, verbose=True):
-    """Collect all strings/synonyms for ICD-10 codes from MRCONSO.RRF."""
+    """Collect all strings/synonyms for ICD-10 codes from MRCONSO.RRF.
+
+    Parameters
+    ----------
+    mrconso_path : str
+        Path to UMLS MRCONSO.RRF file.
+    valid_codes : dict
+        Dictionary of valid ICD-10 codes to filter by.
+    verbose : bool, optional
+        Whether to print progress messages. Defaults to True.
+
+    Returns
+    -------
+    tuple
+        Tuple of (code_to_cuis, code_to_strings) dictionaries.
+    """
     if verbose:
         print("Collecting all strings/synonyms from MRCONSO.RRF...")
 
@@ -117,7 +156,22 @@ def collect_strings_from_mrconso(mrconso_path, valid_codes, verbose=True):
 
 
 def load_definitions_from_mrdef(mrdef_path, all_cuis, verbose=True):
-    """Load definitions from MRDEF.RRF for given CUIs."""
+    """Load definitions from MRDEF.RRF for given CUIs.
+
+    Parameters
+    ----------
+    mrdef_path : str
+        Path to UMLS MRDEF.RRF file.
+    all_cuis : set
+        Set of CUI identifiers to load definitions for.
+    verbose : bool, optional
+        Whether to print progress messages. Defaults to True.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping CUIs to lists of (source, definition) tuples.
+    """
     if verbose:
         print("Loading definitions from MRDEF.RRF...")
 
@@ -149,7 +203,23 @@ def load_definitions_from_mrdef(mrdef_path, all_cuis, verbose=True):
 
 
 def get_best_definition(cuis, cui_to_definitions, source_priority=SOURCE_PRIORITY):
-    """Get best definition from CUIs based on source priority."""
+    """Get best definition from CUIs based on source priority.
+
+    Parameters
+    ----------
+    cuis : set
+        Set of CUI identifiers to search for definitions.
+    cui_to_definitions : dict
+        Dictionary mapping CUIs to lists of (source, definition) tuples.
+    source_priority : list, optional
+        List of source abbreviations in priority order.
+        Defaults to SOURCE_PRIORITY.
+
+    Returns
+    -------
+    tuple
+        Tuple of (best_definition, best_source) or (None, None) if not found.
+    """
     best_def = None
     best_source = None
     best_priority = float("inf")
@@ -169,7 +239,20 @@ def get_best_definition(cuis, cui_to_definitions, source_priority=SOURCE_PRIORIT
 
 
 def combine_strings_and_definition(strings, definition):
-    """Combine synonyms with definition for richer text."""
+    """Combine synonyms with definition for richer text.
+
+    Parameters
+    ----------
+    strings : list of dict
+        List of string dictionaries with 'string' keys.
+    definition : str
+        Definition text to combine with synonyms.
+
+    Returns
+    -------
+    str
+        Combined text with synonyms and definition.
+    """
     unique_strings = []
     seen = set()
 
@@ -195,7 +278,13 @@ def combine_strings_and_definition(strings, definition):
 
 
 def _get_umls_zip_url():
-    """Get download URL for UMLS Metathesaurus Full Subset zip file."""
+    """Get download URL for UMLS Metathesaurus Full Subset zip file.
+
+    Returns
+    -------
+    str
+        URL to UMLS Metathesaurus Full Subset zip file.
+    """
     return (
         f"https://download.nlm.nih.gov/umls/kss/{UMLS_VERSION}/"
         f"umls-{UMLS_VERSION}-metathesaurus-full.zip"
@@ -203,12 +292,32 @@ def _get_umls_zip_url():
 
 
 def _ensure_umls_files(api_key=None, verbose=True):
-    """
-    Ensure UMLS files (MRCONSO.RRF, MRDEF.RRF) are available.
+    """Ensure UMLS files (MRCONSO.RRF, MRDEF.RRF) are available.
 
-    - Uses pystow's UMLS_BASE to store data under ~/.data/openacme/umls
-    - Downloads the big UMLS zip only if it is missing
-    - Extracts MRCONSO.RRF and MRDEF.RRF as regular files (not directories)
+    Uses pystow's UMLS_BASE to store data under ~/.data/openacme/umls.
+    Downloads the UMLS zip only if it is missing, and extracts
+    MRCONSO.RRF and MRDEF.RRF as regular files.
+
+    Parameters
+    ----------
+    api_key : str, optional
+        UMLS API key for downloading data. If None, uses UMLS_API_KEY
+        environment variable. Defaults to None.
+    verbose : bool, optional
+        Whether to print progress messages. Defaults to True.
+
+    Returns
+    -------
+    tuple
+        Tuple of (mrconso_path, mrdef_path) Path objects.
+
+    Raises
+    ------
+    ValueError
+        If API key is not provided and UMLS_API_KEY environment variable
+        is not set.
+    FileNotFoundError
+        If required files are not found in the downloaded zip.
     """
     api_key = api_key or os.getenv("UMLS_API_KEY")
     if not api_key:
@@ -294,11 +403,36 @@ def map_icd10_to_definitions(
     umls_api_key=None,
     verbose=True,
 ):
-    """
-    Map ICD-10 codes to definitions with synonyms.
+    """Map ICD-10 codes to definitions with synonyms.
 
-    Uses pystow to automatically download ICD-10 XML zip and UMLS data dump if needed.
-    UMLS download requires an API key (set via umls_api_key parameter or UMLS_API_KEY env var).
+    Uses pystow to automatically download ICD-10 XML zip and UMLS data dump
+    if needed. UMLS download requires an API key (set via umls_api_key
+    parameter or UMLS_API_KEY environment variable).
+
+    Parameters
+    ----------
+    mrconso_path : str, optional
+        Path to UMLS MRCONSO.RRF file. If None, downloads automatically.
+        Defaults to None.
+    mrdef_path : str, optional
+        Path to UMLS MRDEF.RRF file. If None, downloads automatically.
+        Defaults to None.
+    output_json : str, optional
+        Path to output JSON file. If None, uses default location.
+        Defaults to None.
+    output_csv : str, optional
+        Path to output CSV file. If None, uses default location.
+        Defaults to None.
+    umls_api_key : str, optional
+        UMLS API key for downloading data. If None, uses UMLS_API_KEY
+        environment variable. Defaults to None.
+    verbose : bool, optional
+        Whether to print progress messages. Defaults to True.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping ICD-10 codes to definition data.
     """
     # Use pystow to get ICD-10 zip file (downloads if needed)
     icd10_zip_path = ICD10_BASE.ensure(url=ICD10_XML_URL)
