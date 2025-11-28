@@ -1,7 +1,6 @@
 """Map ICD-10 codes to definitions with synonyms."""
 
 import zipfile
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from collections import defaultdict
 import re
@@ -12,8 +11,10 @@ import os
 import logging
 import tqdm
 
-from openacme import OPENACME_BASE
-from openacme.icd10 import ICD10_BASE, ICD10_XML_URL
+from lxml import etree as ET
+
+from .. import OPENACME_BASE
+from . import ICD10_BASE, ICD10_XML_URL
 
 # Pystow modules for organizing data files
 UMLS_BASE = OPENACME_BASE.module("umls")

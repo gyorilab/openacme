@@ -6,10 +6,9 @@ import logging
 import numpy as np
 from pathlib import Path
 
-from langchain_community.vectorstores.oraclevs import log_level
 from sentence_transformers import SentenceTransformer
 
-from openacme import OPENACME_BASE
+from .. import OPENACME_BASE
 
 # Pystow module for embeddings
 EMBEDDINGS_BASE = OPENACME_BASE.module("icd10_embeddings")

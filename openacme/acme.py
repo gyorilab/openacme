@@ -1,7 +1,8 @@
 import networkx as nx
 import tqdm
-from .icd10 import ICD10_BASE, expand_icd10_range, get_icd10_graph
 from bs4 import BeautifulSoup
+
+from .icd10 import ICD10_BASE, expand_icd10_range, get_icd10_graph
 
 ACME_URL = "https://www.cdc.gov/nchs/nvss/manuals/2024/2c-2024-raw.html"
 
