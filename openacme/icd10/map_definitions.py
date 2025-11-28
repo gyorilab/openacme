@@ -350,7 +350,7 @@ def _ensure_umls_files(api_key=None):
     with zipfile.ZipFile(zip_path, "r") as zf:
         mrconso_in_zip = f"{UMLS_VERSION}/META/{DEFAULT_MRCONSO_FNAME}"
         mrdef_in_zip = f"{UMLS_VERSION}/META/{DEFAULT_MRDEF_FNAME}"
-        
+
         # Extract MRCONSO.RRF
         if mrconso_in_zip not in zf.namelist():
             raise FileNotFoundError(
