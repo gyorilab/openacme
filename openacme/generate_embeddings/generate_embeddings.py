@@ -1,9 +1,12 @@
 """Generate embeddings for ICD-10 codes from definitions."""
 
 import json
+import shutil
+import logging
 import numpy as np
 from pathlib import Path
 
+from langchain_community.vectorstores.oraclevs import log_level
 from sentence_transformers import SentenceTransformer
 
 from openacme import OPENACME_BASE
@@ -13,6 +16,8 @@ EMBEDDINGS_BASE = OPENACME_BASE.module("icd10_embeddings")
 
 DEFAULT_MODEL = "all-MiniLM-L6-v2"
 DEFAULT_BATCH_SIZE = 32
+
+logger = logging.getLogger(__name__)
 
 
 def load_icd10_definitions(json_file, verbose=True):
@@ -30,8 +35,8 @@ def load_icd10_definitions(json_file, verbose=True):
     tuple
         Tuple of (codes, definitions, metadata) lists.
     """
-    if verbose:
-        print(f"Loading ICD-10 definitions from {json_file}...")
+    log_level = logger.info if verbose else logger.debug
+    log_level(f"Loading ICD-10 definitions from {json_file}...")
 
     with open(json_file, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -52,8 +57,7 @@ def load_icd10_definitions(json_file, verbose=True):
             }
         )
 
-    if verbose:
-        print(f"  ✓ Loaded {len(codes)} ICD-10 codes")
+    log_level(f"  ✓ Loaded {len(codes)} ICD-10 codes")
 
     return codes, definitions, metadata
 
@@ -92,15 +96,14 @@ def generate_embeddings(
             "sentence-transformers not installed. "
             "Install with: pip install sentence-transformers"
         )
+    log_level = logger.info if verbose else logger.debug
 
-    if verbose:
-        print(f"\nLoading sentence transformer model: {model_name}...")
+    log_level(f"\nLoading sentence transformer model: {model_name}...")
 
     model = SentenceTransformer(model_name)
 
-    if verbose:
-        print(f"  ✓ Model loaded (max_seq_length: {model.max_seq_length})")
-        print(f"\nGenerating embeddings (batch_size={batch_size})...")
+    log_level(f"  ✓ Model loaded (max_seq_length: {model.max_seq_length})")
+    log_level(f"\nGenerating embeddings (batch_size={batch_size})...")
 
     embeddings = model.encode(
         definitions,
@@ -110,9 +113,8 @@ def generate_embeddings(
         normalize_embeddings=normalize,
     )
 
-    if verbose:
-        print(f"  ✓ Generated embeddings shape: {embeddings.shape}")
-        print(f"  ✓ Embedding dimension: {embeddings.shape[1]}")
+    log_level(f"  ✓ Generated embeddings shape: {embeddings.shape}")
+    log_level(f"  ✓ Embedding dimension: {embeddings.shape[1]}")
 
     return embeddings
 
@@ -150,42 +152,36 @@ def save_embeddings(
     pathlib.Path
         Path to saved embeddings.npy file.
     """
+    log_level = logger.info if verbose else logger.debug
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
 
-    if verbose:
-        print(f"\nSaving embeddings to {output_dir}...")
+    log_level(f"\nSaving embeddings to {output_dir}...")
 
     embeddings_file = output_dir / "embeddings.npy"
     np.save(embeddings_file, embeddings)
-    if verbose:
-        print(f"  ✓ Saved embeddings: {embeddings_file}")
+    log_level(f"  ✓ Saved embeddings: {embeddings_file}")
 
     # Copy definitions JSON file
     if definitions_json:
-        import shutil
 
         definitions_json_src = Path(definitions_json)
         definitions_json_dst = output_dir / "icd10_code_to_definition.json"
         if definitions_json_src.exists() and definitions_json_src != definitions_json_dst:
             shutil.copy2(definitions_json_src, definitions_json_dst)
-            if verbose:
-                print(f"  ✓ Copied definitions JSON: {definitions_json_dst}")
-        elif definitions_json_src == definitions_json_dst and verbose:
-            print("  ✓ Definitions JSON already in output directory")
+            log_level(f"  ✓ Copied definitions JSON: {definitions_json_dst}")
+        elif definitions_json_src == definitions_json_dst:
+            log_level("  ✓ Definitions JSON already in output directory")
 
     # Copy definitions CSV file
     if definitions_csv:
-        import shutil
-
         definitions_csv_src = Path(definitions_csv)
         definitions_csv_dst = output_dir / "icd10_code_to_definition.csv"
         if definitions_csv_src.exists() and definitions_csv_src != definitions_csv_dst:
             shutil.copy2(definitions_csv_src, definitions_csv_dst)
-            if verbose:
-                print(f"  ✓ Copied definitions CSV: {definitions_csv_dst}")
-        elif definitions_csv_src == definitions_csv_dst and verbose:
-            print("  ✓ Definitions CSV already in output directory")
+            log_level(f"  ✓ Copied definitions CSV: {definitions_csv_dst}")
+        elif definitions_csv_src == definitions_csv_dst:
+            log_level("  ✓ Definitions CSV already in output directory")
 
     return embeddings_file
 
@@ -274,19 +270,17 @@ def generate_icd10_embeddings(
     pathlib.Path
         Path to saved embeddings.npy file.
     """
-
+    log_level = logger.info if verbose else logger.debug
     from .map_definitions import map_icd10_to_definitions
 
-    if verbose:
-        print("=" * 70)
-        print("ICD-10 Code -> Definition -> Embedding Pipeline")
-        print("=" * 70)
-        print(f"\nOutput directory: {EMBEDDINGS_BASE.base}")
+    log_level("=" * 70)
+    log_level("ICD-10 Code -> Definition -> Embedding Pipeline")
+    log_level("=" * 70)
+    log_level(f"\nOutput directory: {EMBEDDINGS_BASE.base}")
 
     # Step 1 — Map ICD-10 codes to definitions
-    if verbose:
-        print("\nStep 1: Mapping ICD-10 codes to definitions")
-        print("-" * 70)
+    log_level("\nStep 1: Mapping ICD-10 codes to definitions")
+    log_level("-" * 70)
 
     definitions_json = Path(EMBEDDINGS_BASE.base) / "icd10_code_to_definition.json"
     definitions_csv = Path(EMBEDDINGS_BASE.base) / "icd10_code_to_definition.csv"
@@ -301,9 +295,8 @@ def generate_icd10_embeddings(
     )
 
     # Step 2 — Load definitions and generate embeddings
-    if verbose:
-        print("\nStep 2: Generating embeddings")
-        print("-" * 70)
+    log_level("\nStep 2: Generating embeddings")
+    log_level("-" * 70)
 
     codes, definitions, metadata = load_icd10_definitions(definitions_json, verbose=verbose)
 
@@ -324,20 +317,19 @@ def generate_icd10_embeddings(
         verbose=verbose,
     )
 
-    if verbose:
-        print("\n" + "=" * 70)
-        print("✓ Pipeline Complete!")
-        print("=" * 70)
-        print("\nSummary:")
-        print(f"  Total codes processed: {len(codes):,}")
-        print(f"  Embedding dimension: {embeddings.shape[1]}")
-        print(f"  Embeddings shape: {embeddings.shape}")
-        print(f"\nAll files saved to: {EMBEDDINGS_BASE.base}/")
-        print("  - embeddings.npy")
-        print("  - icd10_code_to_definition.json")
-        print("  - icd10_code_to_definition.csv")
-        print("\nYou can reconstruct code index with:")
-        print("  from openacme.generate_embeddings import get_code_index")
-        print("  code_index = get_code_index(definitions_data)")
+    log_level("\n" + "=" * 70)
+    log_level("✓ Pipeline Complete!")
+    log_level("=" * 70)
+    log_level("\nSummary:")
+    log_level(f"  Total codes processed: {len(codes):,}")
+    log_level(f"  Embedding dimension: {embeddings.shape[1]}")
+    log_level(f"  Embeddings shape: {embeddings.shape}")
+    log_level(f"\nAll files saved to: {EMBEDDINGS_BASE.base}/")
+    log_level("  - embeddings.npy")
+    log_level("  - icd10_code_to_definition.json")
+    log_level("  - icd10_code_to_definition.csv")
+    log_level("\nYou can reconstruct code index with:")
+    log_level("  from openacme.generate_embeddings import get_code_index")
+    log_level("  code_index = get_code_index(definitions_data)")
 
     return embeddings_file

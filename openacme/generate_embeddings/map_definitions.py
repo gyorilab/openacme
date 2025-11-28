@@ -9,6 +9,8 @@ import json
 import csv
 import shutil
 import os
+import logging
+import tqdm
 
 from openacme import OPENACME_BASE
 from openacme.icd10 import ICD10_BASE, ICD10_XML_URL
@@ -27,6 +29,8 @@ DEFAULT_MRDEF_FNAME = "MRDEF.RRF"
 
 # Source priority for definitions
 SOURCE_PRIORITY = ["MSH", "CSP", "NCI", "HPO", "SNOMEDCT_US", "MEDLINEPLUS"]
+
+logger = logging.getLogger(__name__)
 
 
 def is_valid_diagnosis_code(code):
@@ -47,23 +51,20 @@ def is_valid_diagnosis_code(code):
     return bool(re.match(r"^[A-Z]\d{2}(\.\d+)?$", code))
 
 
-def extract_icd10_codes(icd10_zip_path, verbose=True):
+def extract_icd10_codes(icd10_zip_path):
     """Extract ICD-10 codes from XML zip file.
 
     Parameters
     ----------
     icd10_zip_path : str
         Path to ICD-10 XML zip file.
-    verbose : bool, optional
-        Whether to print progress messages. Defaults to True.
 
     Returns
     -------
     dict
         Dictionary mapping ICD-10 codes to their names.
     """
-    if verbose:
-        print("Extracting ICD-10 codes from XML...")
+    logger.info("Extracting ICD-10 codes from XML...")
 
     icd10_codes = {}
     with zipfile.ZipFile(icd10_zip_path, "r") as zf:
@@ -88,13 +89,12 @@ def extract_icd10_codes(icd10_zip_path, verbose=True):
         if is_valid_diagnosis_code(code)
     }
 
-    if verbose:
-        print(f"  ✓ Extracted {len(valid_codes)} valid ICD-10 diagnosis codes")
+    logger.info(f"  ✓ Extracted {len(valid_codes)} valid ICD-10 diagnosis codes")
 
     return valid_codes
 
 
-def collect_strings_from_mrconso(mrconso_path, valid_codes, verbose=True):
+def collect_strings_from_mrconso(mrconso_path, valid_codes):
     """Collect all strings/synonyms for ICD-10 codes from MRCONSO.RRF.
 
     Parameters
@@ -103,27 +103,21 @@ def collect_strings_from_mrconso(mrconso_path, valid_codes, verbose=True):
         Path to UMLS MRCONSO.RRF file.
     valid_codes : dict
         Dictionary of valid ICD-10 codes to filter by.
-    verbose : bool, optional
-        Whether to print progress messages. Defaults to True.
 
     Returns
     -------
     tuple
         Tuple of (code_to_cuis, code_to_strings) dictionaries.
     """
-    if verbose:
-        print("Collecting all strings/synonyms from MRCONSO.RRF...")
+    logger.info("Collecting all strings/synonyms from MRCONSO.RRF...")
 
     code_to_cuis = defaultdict(set)
     code_to_strings = defaultdict(list)
 
     with open(mrconso_path, "r", encoding="utf-8", errors="ignore") as f:
         line_count = 0
-        for line in f:
+        for line in tqdm.tqdm(f, desc="Processing MRCONSO.RRF", unit="lines"):
             line_count += 1
-            if verbose and line_count % 2_000_000 == 0:
-                print(f"  Processed {line_count:,} lines...")
-
             parts = line.strip().split("|")
             if len(parts) >= 15:
                 sab = parts[11]
@@ -145,9 +139,8 @@ def collect_strings_from_mrconso(mrconso_path, valid_codes, verbose=True):
                             }
                         )
 
-    if verbose:
-        print(f"  ✓ Found strings for {len(code_to_strings)} codes")
-        print(
+        logger.info(f"  ✓ Found strings for {len(code_to_strings)} codes")
+        logger.info(
             "  ✓ Codes with multiple strings: "
             f"{sum(1 for s in code_to_strings.values() if len(s) > 1):,}"
         )
@@ -155,7 +148,7 @@ def collect_strings_from_mrconso(mrconso_path, valid_codes, verbose=True):
     return code_to_cuis, code_to_strings
 
 
-def load_definitions_from_mrdef(mrdef_path, all_cuis, verbose=True):
+def load_definitions_from_mrdef(mrdef_path, all_cuis):
     """Load definitions from MRDEF.RRF for given CUIs.
 
     Parameters
@@ -164,29 +157,20 @@ def load_definitions_from_mrdef(mrdef_path, all_cuis, verbose=True):
         Path to UMLS MRDEF.RRF file.
     all_cuis : set
         Set of CUI identifiers to load definitions for.
-    verbose : bool, optional
-        Whether to print progress messages. Defaults to True.
 
     Returns
     -------
     dict
         Dictionary mapping CUIs to lists of (source, definition) tuples.
     """
-    if verbose:
-        print("Loading definitions from MRDEF.RRF...")
+    logger.info("Loading definitions from MRDEF.RRF...")
 
     cui_to_definitions = defaultdict(list)
 
     with open(mrdef_path, "r", encoding="utf-8", errors="ignore") as f:
         line_count = 0
-        for line in f:
+        for line in tqdm.tqdm(f, desc="Processing MRDEF.RRF", unit="lines"):
             line_count += 1
-            if verbose and line_count % 100_000 == 0:
-                print(
-                    f"  Processed {line_count:,} lines, "
-                    f"found {len(cui_to_definitions):,} CUIs..."
-                )
-
             parts = line.strip().split("|")
             if len(parts) >= 6:
                 cui = parts[0]
@@ -196,8 +180,7 @@ def load_definitions_from_mrdef(mrdef_path, all_cuis, verbose=True):
                     if definition and definition.strip():
                         cui_to_definitions[cui].append((sab, definition))
 
-    if verbose:
-        print(f"  ✓ Found definitions for {len(cui_to_definitions)} CUIs")
+    logger.info(f"  ✓ Found definitions for {len(cui_to_definitions)} CUIs")
 
     return cui_to_definitions
 
@@ -291,7 +274,7 @@ def _get_umls_zip_url():
     )
 
 
-def _ensure_umls_files(api_key=None, verbose=True):
+def _ensure_umls_files(api_key=None):
     """Ensure UMLS files (MRCONSO.RRF, MRDEF.RRF) are available.
 
     Uses pystow's UMLS_BASE to store data under ~/.data/openacme/umls.
@@ -303,8 +286,6 @@ def _ensure_umls_files(api_key=None, verbose=True):
     api_key : str, optional
         UMLS API key for downloading data. If None, uses UMLS_API_KEY
         environment variable. Defaults to None.
-    verbose : bool, optional
-        Whether to print progress messages. Defaults to True.
 
     Returns
     -------
@@ -327,8 +308,7 @@ def _ensure_umls_files(api_key=None, verbose=True):
             "Get your API key from: https://uts.nlm.nih.gov/uts/profile"
         )
 
-    if verbose:
-        print("Ensuring UMLS data files are available...")
+    logger.info("Ensuring UMLS data files are available...")
 
     # Files should live directly under the UMLS module base directory
     mrconso_path = Path(UMLS_BASE.base) / DEFAULT_MRCONSO_FNAME
@@ -336,8 +316,7 @@ def _ensure_umls_files(api_key=None, verbose=True):
 
     # Fast path: if both extracted files already exist, we're done
     if mrconso_path.exists() and mrdef_path.exists():
-        if verbose:
-            print("✓ UMLS files already exist — skipping download and extraction")
+        logger.info("✓ UMLS files already exist — skipping download and extraction")
         return mrconso_path, mrdef_path
 
     # Name and expected location of the UMLS master zip
@@ -357,14 +336,13 @@ def _ensure_umls_files(api_key=None, verbose=True):
         )
     )
 
-    if verbose:
-        if zip_already_present:
-            print(f"  ✓ Using cached zip file: {zip_path}")
-        else:
-            print(
-                "  ✓ Downloaded UMLS Metathesaurus Full Subset zip to: "
-                f"{zip_path}"
-            )
+    if zip_already_present:
+        logger.info(f"  ✓ Using cached zip file: {zip_path}")
+    else:
+        logger.info(
+            "  ✓ Downloaded UMLS Metathesaurus Full Subset zip to: "
+            f"{zip_path}"
+        )
 
     # Extract the two RRF files
     # Files are located at: {VERSION}/META/{FILENAME}
@@ -401,7 +379,6 @@ def map_icd10_to_definitions(
     output_json=None,
     output_csv=None,
     umls_api_key=None,
-    verbose=True,
 ):
     """Map ICD-10 codes to definitions with synonyms.
 
@@ -426,8 +403,6 @@ def map_icd10_to_definitions(
     umls_api_key : str, optional
         UMLS API key for downloading data. If None, uses UMLS_API_KEY
         environment variable. Defaults to None.
-    verbose : bool, optional
-        Whether to print progress messages. Defaults to True.
 
     Returns
     -------
@@ -441,7 +416,6 @@ def map_icd10_to_definitions(
     if mrconso_path is None or mrdef_path is None:
         extracted_mrconso, extracted_mrdef = _ensure_umls_files(
             api_key=umls_api_key,
-            verbose=verbose,
         )
         if mrconso_path is None:
             mrconso_path = extracted_mrconso
@@ -460,22 +434,19 @@ def map_icd10_to_definitions(
     output_json = Path(output_json)
     output_csv = Path(output_csv)
 
-    if verbose:
-        print("=" * 70)
-        print("ICD-10 Code to Definition Mapping")
-        print("=" * 70)
-        print(f"\nUsing ICD-10 zip: {icd10_zip_path}")
-        print(f"Using MRCONSO: {mrconso_path}")
-        print(f"Using MRDEF: {mrdef_path}")
+    logger.info("ICD-10 Code to Definition Mapping")
+    logger.info("=" * 70)
+    logger.info(f"\nUsing ICD-10 zip: {icd10_zip_path}")
+    logger.info(f"Using MRCONSO: {mrconso_path}")
+    logger.info(f"Using MRDEF: {mrdef_path}")
 
     # Step 1: Extract ICD-10 codes
-    valid_codes = extract_icd10_codes(str(icd10_zip_path), verbose=verbose)
+    valid_codes = extract_icd10_codes(str(icd10_zip_path))
 
     # Step 2: Collect strings from MRCONSO
     code_to_cuis, code_to_strings = collect_strings_from_mrconso(
         str(mrconso_path),
         valid_codes,
-        verbose=verbose,
     )
 
     # Step 3: Get all CUIs
@@ -486,14 +457,12 @@ def map_icd10_to_definitions(
     # Step 4: Load definitions
     cui_to_definitions = load_definitions_from_mrdef(
         str(mrdef_path),
-        all_cuis,
-        verbose=verbose,
+        all_cuis
     )
 
     # Step 5: Create mappings
-    if verbose:
-        print("\nCreating mappings...")
-        print("-" * 70)
+    logger.info("\nCreating mappings...")
+    logger.info("-" * 70)
 
     icd10_data = {}
 
@@ -538,37 +507,34 @@ def map_icd10_to_definitions(
         1 for v in icd10_data.values() if v["num_strings"] > 1
     )
 
-    if verbose:
-        print("\nResults:")
-        print("-" * 70)
-        print(f"  Total codes: {len(icd10_data):,}")
-        print(
-            f"  Codes with UMLS definitions: {codes_with_defs:,} "
-            f"({codes_with_defs / len(icd10_data) * 100:.1f}%)"
-        )
-        print(
-            "  Codes with multiple strings/synonyms: "
-            f"{codes_with_synonyms:,} "
-            f"({codes_with_synonyms / len(icd10_data) * 100:.1f}%)"
-        )
+    logger.info("\nResults:")
+    logger.info("-" * 70)
+    logger.info(f"  Total codes: {len(icd10_data):,}")
+    logger.info(
+        f"  Codes with UMLS definitions: {codes_with_defs:,} "
+        f"({codes_with_defs / len(icd10_data) * 100:.1f}%)"
+    )
+    logger.info(
+        "  Codes with multiple strings/synonyms: "
+        f"{codes_with_synonyms:,} "
+        f"({codes_with_synonyms / len(icd10_data) * 100:.1f}%)"
+    )
 
-        avg_length = (
-            sum(len(v["definition"]) for v in icd10_data.values())
-            / len(icd10_data)
-        )
-        print(f"  Average definition length: {avg_length:.1f} chars")
+    avg_length = (
+        sum(len(v["definition"]) for v in icd10_data.values())
+        / len(icd10_data)
+    )
+    logger.info(f"  Average definition length: {avg_length:.1f} chars")
 
     # Save JSON
-    if verbose:
-        print(f"\nSaving data to {output_json}...")
-        print("-" * 70)
+    logger.info(f"\nSaving data to {output_json}...")
+    logger.info("-" * 70)
 
     output_json.parent.mkdir(parents=True, exist_ok=True)
     with open(output_json, "w", encoding="utf-8") as f:
         json.dump(icd10_data, f, indent=2, ensure_ascii=False)
 
-    if verbose:
-        print(f"  ✓ Saved {len(icd10_data):,} mappings")
+    logger.info(f"  ✓ Saved {len(icd10_data):,} mappings")
 
     # Save CSV
     output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -589,10 +555,9 @@ def map_icd10_to_definitions(
                 ]
             )
 
-    if verbose:
-        print(f"  ✓ Saved CSV: {output_csv}")
-        print("\n" + "=" * 70)
-        print("✓ Mapping complete!")
-        print("=" * 70)
+    logger.info(f"  ✓ Saved CSV: {output_csv}")
+    logger.info("\n" + "=" * 70)
+    logger.info("✓ Mapping complete!")
+    logger.info("=" * 70)
 
     return icd10_data
