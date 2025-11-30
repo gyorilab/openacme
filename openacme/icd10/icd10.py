@@ -16,14 +16,15 @@ with decimal points. For example:
 
 Chapter (I) -> Block (A00-A09) -> Category (A00) -> Category (A00.0)
 """
-__all__ = ['ICD10_BASE', 'ICD10_XML_URL', 'get_icd10_graph']
+__all__ = ['ICD10_BASE', 'ICD10_XML_URL', 'get_icd10_graph',
+           'expand_icd10_range']
 
 import zipfile
 from lxml import etree
 from collections import defaultdict
 import networkx as nx
 
-from openacme import OPENACME_BASE
+from .. import OPENACME_BASE
 
 ICD10_BASE = OPENACME_BASE.module('icd10')
 ICD10_XML_URL = "https://icdcdn.who.int/icd10/claml/icd102019en.xml.zip"
@@ -73,7 +74,9 @@ def get_icd10_graph():
         for rubric in cls.findall('Rubric'):
             rubric_kind = rubric.attrib['kind']
             name = rubric.find('Label').text
-            rubric_data[rubric_kind].append(name)
+            name = name.strip() if name else None
+            if name:
+                rubric_data[rubric_kind].append(name)
         nodes.append([code, {'kind': kind, 'rubrics': dict(rubric_data)}])
 
     g = nx.DiGraph()
