@@ -72,7 +72,7 @@ def process_table_d(icd10_graph, soup):
                        {part['source'] for part in parts})]
     edges = []
     for part in parts:
-        edge = (part['source'], part['target'], {'type': 'causes'})
+        edge = (part['source'], part['target'], {'kind': 'causes'})
         edges.append(edge)
         if isinstance(part['source'], tuple):
             # Expand range
@@ -80,14 +80,14 @@ def process_table_d(icd10_graph, soup):
                 icd10_graph, part['source'][0], part['source'][1]
             )
             for code in codes_in_range:
-                edges.append((code, part['source'], {'type': 'part_of_range'}))
+                edges.append((code, part['source'], {'kind': 'part_of_range'}))
     g = nx.DiGraph()
     g.add_nodes_from(nodes)
     g.add_edges_from(edges)
     return g
 
 
-if __name__ == '__main__':
+def get_acme_graph():
     acme_file = ICD10_BASE.ensure(url=ACME_URL)
     with open(acme_file, 'r') as fh:
         acme_text = fh.read()
@@ -95,5 +95,10 @@ if __name__ == '__main__':
     soup = BeautifulSoup(acme_text, features='lxml')
 
     acme_g = process_table_d(g, soup)
+    return acme_g
+
+
+if __name__ == '__main__':
+    g = get_acme_graph()
 
 
