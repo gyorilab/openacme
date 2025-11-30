@@ -74,7 +74,9 @@ def get_icd10_graph():
         for rubric in cls.findall('Rubric'):
             rubric_kind = rubric.attrib['kind']
             name = rubric.find('Label').text
-            rubric_data[rubric_kind].append(name)
+            name = name.strip() if name else None
+            if name:
+                rubric_data[rubric_kind].append(name)
         nodes.append([code, {'kind': kind, 'rubrics': dict(rubric_data)}])
 
     g = nx.DiGraph()
