@@ -1,7 +1,6 @@
 """Generate embeddings for ICD-10 codes from definitions."""
 
 import json
-import shutil
 import logging
 import numpy as np
 from pathlib import Path
@@ -119,30 +118,18 @@ def generate_embeddings(
 
 
 def save_embeddings(
-    codes,
     embeddings,
-    metadata,
     output_dir,
-    definitions_json=None,
-    definitions_csv=None,
     verbose=True,
 ):
-    """Save embeddings and optionally copy definition files.
+    """Save embeddings to output directory.
 
     Parameters
     ----------
-    codes : list of str
-        List of ICD-10 codes corresponding to embeddings.
     embeddings : numpy.ndarray
         Array of embeddings to save.
-    metadata : list of dict
-        List of metadata dictionaries for each code.
     output_dir : str
-        Directory path to save embeddings and definition files.
-    definitions_json : str, optional
-        Path to source JSON definitions file to copy. Defaults to None.
-    definitions_csv : str, optional
-        Path to source CSV definitions file to copy. Defaults to None.
+        Directory path to save embeddings.
     verbose : bool, optional
         Whether to print progress messages. Defaults to True.
 
@@ -160,27 +147,6 @@ def save_embeddings(
     embeddings_file = output_dir / "embeddings.npy"
     np.save(embeddings_file, embeddings)
     log_level(f"  ✓ Saved embeddings: {embeddings_file}")
-
-    # Copy definitions JSON file
-    if definitions_json:
-
-        definitions_json_src = Path(definitions_json)
-        definitions_json_dst = output_dir / "icd10_code_to_definition.json"
-        if definitions_json_src.exists() and definitions_json_src != definitions_json_dst:
-            shutil.copy2(definitions_json_src, definitions_json_dst)
-            log_level(f"  ✓ Copied definitions JSON: {definitions_json_dst}")
-        elif definitions_json_src == definitions_json_dst:
-            log_level("  ✓ Definitions JSON already in output directory")
-
-    # Copy definitions CSV file
-    if definitions_csv:
-        definitions_csv_src = Path(definitions_csv)
-        definitions_csv_dst = output_dir / "icd10_code_to_definition.csv"
-        if definitions_csv_src.exists() and definitions_csv_src != definitions_csv_dst:
-            shutil.copy2(definitions_csv_src, definitions_csv_dst)
-            log_level(f"  ✓ Copied definitions CSV: {definitions_csv_dst}")
-        elif definitions_csv_src == definitions_csv_dst:
-            log_level("  ✓ Definitions CSV already in output directory")
 
     return embeddings_file
 
@@ -282,13 +248,11 @@ def generate_icd10_embeddings(
     log_level("-" * 70)
 
     definitions_json = Path(EMBEDDINGS_BASE.base) / "icd10_code_to_definition.json"
-    definitions_csv = Path(EMBEDDINGS_BASE.base) / "icd10_code_to_definition.csv"
 
     icd10_data = map_icd10_to_definitions(
         mrconso_path=mrconso_path,
         mrdef_path=mrdef_path,
         output_json=str(definitions_json),
-        output_csv=str(definitions_csv),
         umls_api_key=umls_api_key,
     )
 
@@ -306,12 +270,8 @@ def generate_icd10_embeddings(
     )
 
     embeddings_file = save_embeddings(
-        codes,
         embeddings,
-        metadata,
         EMBEDDINGS_BASE.base,
-        definitions_json=str(definitions_json),
-        definitions_csv=str(definitions_csv),
         verbose=verbose,
     )
 
@@ -325,7 +285,6 @@ def generate_icd10_embeddings(
     log_level(f"\nAll files saved to: {EMBEDDINGS_BASE.base}/")
     log_level("  - embeddings.npy")
     log_level("  - icd10_code_to_definition.json")
-    log_level("  - icd10_code_to_definition.csv")
     log_level("\nYou can reconstruct code index with:")
     log_level("  from openacme.generate_embeddings import get_code_index")
     log_level("  code_index = get_code_index(definitions_data)")
