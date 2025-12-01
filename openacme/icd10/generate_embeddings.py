@@ -290,7 +290,6 @@ def generate_icd10_embeddings(
         output_json=str(definitions_json),
         output_csv=str(definitions_csv),
         umls_api_key=umls_api_key,
-        verbose=verbose,
     )
 
     # Step 2 — Load definitions and generate embeddings
