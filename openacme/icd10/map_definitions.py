@@ -5,7 +5,6 @@ from pathlib import Path
 from collections import defaultdict
 import re
 import json
-import csv
 import shutil
 import os
 import logging
@@ -378,7 +377,6 @@ def map_icd10_to_definitions(
     mrconso_path=None,
     mrdef_path=None,
     output_json=None,
-    output_csv=None,
     umls_api_key=None,
 ):
     """Map ICD-10 codes to definitions with synonyms.
@@ -398,9 +396,6 @@ def map_icd10_to_definitions(
     output_json : str, optional
         Path to output JSON file. If None, uses default location.
         Defaults to None.
-    output_csv : str, optional
-        Path to output CSV file. If None, uses default location.
-        Defaults to None.
     umls_api_key : str, optional
         UMLS API key for downloading data. If None, uses UMLS_API_KEY
         environment variable. Defaults to None.
@@ -412,6 +407,23 @@ def map_icd10_to_definitions(
     """
     # Use pystow to get ICD-10 zip file (downloads if needed)
     icd10_zip_path = ICD10_BASE.ensure(url=ICD10_XML_URL)
+
+    # Use EMBEDDINGS_BASE for output if not specified
+    if output_json is None:
+        output_json = EMBEDDINGS_BASE.join("icd10_code_to_definition.json")
+    output_json = Path(output_json)
+
+    # Short-circuit: if output file already exists, load and return
+    if output_json.is_file():
+        logger.info("ICD-10 Code to Definition Mapping")
+        logger.info("=" * 70)
+        logger.info(f"✓ Output file already exists — loading from cache")
+        logger.info(f"  JSON: {output_json}")
+        with open(output_json, "r", encoding="utf-8") as f:
+            icd10_data = json.load(f)
+        logger.info(f"  ✓ Loaded {len(icd10_data):,} mappings")
+        logger.info("=" * 70)
+        return icd10_data
 
     # Ensure UMLS files are available (downloads and extracts if needed)
     if mrconso_path is None or mrdef_path is None:
@@ -425,15 +437,6 @@ def map_icd10_to_definitions(
 
     mrconso_path = Path(mrconso_path)
     mrdef_path = Path(mrdef_path)
-
-    # Use EMBEDDINGS_BASE for output if not specified
-    if output_json is None:
-        output_json = EMBEDDINGS_BASE.join("icd10_code_to_definition.json")
-    if output_csv is None:
-        output_csv = EMBEDDINGS_BASE.join("icd10_code_to_definition.csv")
-
-    output_json = Path(output_json)
-    output_csv = Path(output_csv)
 
     logger.info("ICD-10 Code to Definition Mapping")
     logger.info("=" * 70)
@@ -536,27 +539,6 @@ def map_icd10_to_definitions(
         json.dump(icd10_data, f, indent=2, ensure_ascii=False)
 
     logger.info(f"  ✓ Saved {len(icd10_data):,} mappings")
-
-    # Save CSV
-    output_csv.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_csv, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(
-            ["code", "name", "definition", "source", "has_definition", "num_synonyms"]
-        )
-        for code, data in sorted(icd10_data.items()):
-            writer.writerow(
-                [
-                    data["code"],
-                    data["name"],
-                    data["definition"],
-                    data["source"],
-                    data["has_definition"],
-                    data["num_strings"],
-                ]
-            )
-
-    logger.info(f"  ✓ Saved CSV: {output_csv}")
     logger.info("\n" + "=" * 70)
     logger.info("✓ Mapping complete!")
     logger.info("=" * 70)
