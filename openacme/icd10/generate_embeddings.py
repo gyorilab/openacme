@@ -256,24 +256,38 @@ def generate_icd10_embeddings(
         umls_api_key=umls_api_key,
     )
 
-    # Step 2 — Load definitions and generate embeddings
-    log_level("\nStep 2: Generating embeddings")
-    log_level("-" * 70)
-
+    # Step 2 — Load definitions
     codes, definitions, metadata = load_icd10_definitions(definitions_json, verbose=verbose)
 
-    embeddings = generate_embeddings(
-        definitions,
-        model_name=model_name,
-        batch_size=batch_size,
-        verbose=verbose,
-    )
+    # Step 3 — Load embeddings
+    embeddings_file = Path(EMBEDDINGS_BASE.base) / "embeddings.npy"
+    
+    if embeddings_file.is_file():
+        log_level("\nStep 3: Loading existing embeddings")
+        log_level("-" * 70)
+        log_level(f"✓ Embeddings file already exists — loading from cache")
+        log_level(f"  File: {embeddings_file}")
+        
+        embeddings = np.load(str(embeddings_file))
+        
+        log_level(f"  ✓ Loaded embeddings shape: {embeddings.shape}")
+        log_level(f"  ✓ Loaded definitions for {len(codes)} codes")
+    else:
+        log_level("\nStep 3: Generating embeddings")
+        log_level("-" * 70)
 
-    embeddings_file = save_embeddings(
-        embeddings,
-        EMBEDDINGS_BASE.base,
-        verbose=verbose,
-    )
+        embeddings = generate_embeddings(
+            definitions,
+            model_name=model_name,
+            batch_size=batch_size,
+            verbose=verbose,
+        )
+
+        embeddings_file = save_embeddings(
+            embeddings,
+            EMBEDDINGS_BASE.base,
+            verbose=verbose,
+        )
 
     log_level("\n" + "=" * 70)
     log_level("✓ Pipeline Complete!")
