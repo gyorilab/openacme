@@ -1,4 +1,5 @@
 __all__ = ['OPENACME_BASE']
+__version__ = '0.1.0'
 
 import logging
 
