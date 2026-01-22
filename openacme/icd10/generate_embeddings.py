@@ -45,7 +45,12 @@ def load_icd10_definitions(json_file, verbose=True):
 
     for code, entry in sorted(data.items()):
         codes.append(code)
-        definitions.append(entry["definition"])
+        ## small work around to deal with the presence of lists in the json file in a type safe way.
+        definition = entry["definition"]
+        if isinstance(definition, list):
+            definition = "; ".join(definition)
+        assert isinstance(definition, str), "Definition must be parsable as a string"
+        definitions.append(definition)
         metadata.append(
             {
                 "code": code,
@@ -102,7 +107,6 @@ def generate_embeddings(
 
     log_level(f"  ✓ Model loaded (max_seq_length: {model.max_seq_length})")
     log_level(f"\nGenerating embeddings (batch_size={batch_size})...")
-
     embeddings = model.encode(
         definitions,
         batch_size=batch_size,
@@ -257,19 +261,21 @@ def generate_icd10_embeddings(
     )
 
     # Step 2 — Load definitions
-    codes, definitions, metadata = load_icd10_definitions(definitions_json, verbose=verbose)
+    codes, definitions, metadata = load_icd10_definitions(
+        definitions_json, verbose=verbose
+    )
 
     # Step 3 — Load embeddings
     embeddings_file = Path(EMBEDDINGS_BASE.base) / "embeddings.npy"
-    
+
     if embeddings_file.is_file():
         log_level("\nStep 3: Loading existing embeddings")
         log_level("-" * 70)
         log_level(f"✓ Embeddings file already exists — loading from cache")
         log_level(f"  File: {embeddings_file}")
-        
+
         embeddings = np.load(str(embeddings_file))
-        
+
         log_level(f"  ✓ Loaded embeddings shape: {embeddings.shape}")
         log_level(f"  ✓ Loaded definitions for {len(codes)} codes")
     else:

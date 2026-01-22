@@ -52,7 +52,7 @@ def is_valid_diagnosis_code(code):
 
 
 def extract_icd10_codes(icd10_zip_path):
-    """Extract ICD-10 codes from XML zip file.
+    """Extract ICD-10 codes and a mapping of higher order codes to their sub-classes from XML zip file.
 
     Parameters
     ----------
@@ -63,10 +63,12 @@ def extract_icd10_codes(icd10_zip_path):
     -------
     dict
         Dictionary mapping ICD-10 codes to their names.
+        Dictionary mapping higher-order ICD-10 (EX: chapters, blocks) codes to the codes of their sub-classes.
     """
     logger.info("Extracting ICD-10 codes from XML...")
 
     icd10_codes = {}
+    higher_order_codes = {}
     with zipfile.ZipFile(icd10_zip_path, "r") as zf:
         with zf.open("icd102019en.xml") as f:
             tree = ET.parse(f)
@@ -74,14 +76,24 @@ def extract_icd10_codes(icd10_zip_path):
             for class_elem in root.iter("Class"):
                 code = class_elem.get("code")
                 if code:
+                    kind = class_elem.get("kind")
                     name = None
-                    for rubric in class_elem.findall(".//Rubric"):
-                        label = rubric.find("Label")
-                        if label is not None:
-                            name = label.text
-                            break
-                    if name:
-                        icd10_codes[code] = name
+                    if kind == "category":
+                        for rubric in class_elem.findall(".//Rubric"):
+                            label = rubric.find("Label")
+                            if label is not None:
+                                name = label.text
+                                break
+                        if name:
+                            icd10_codes[code] = name
+                    else:
+                        sub_classes = class_elem.findall("SubClass")
+                        if len(sub_classes) > 0:
+                            higher_order_codes[code] = {
+                                sub_class.attrib["code"]
+                                for sub_class in sub_classes
+                                if is_valid_diagnosis_code(sub_class.attrib["code"])
+                            }
 
     valid_codes = {
         code: name
@@ -90,8 +102,8 @@ def extract_icd10_codes(icd10_zip_path):
     }
 
     logger.info(f"  ✓ Extracted {len(valid_codes)} valid ICD-10 diagnosis codes")
-
-    return valid_codes
+    logger.info(f"  ✓ Extracted {len(higher_order_codes)} ICD-10 higher oder codes")
+    return valid_codes, higher_order_codes
 
 
 def collect_strings_from_mrconso(mrconso_path, valid_codes):
@@ -340,8 +352,7 @@ def _ensure_umls_files(api_key=None):
         logger.info(f"  ✓ Using cached zip file: {zip_path}")
     else:
         logger.info(
-            "  ✓ Downloaded UMLS Metathesaurus Full Subset zip to: "
-            f"{zip_path}"
+            "  ✓ Downloaded UMLS Metathesaurus Full Subset zip to: " f"{zip_path}"
         )
 
     # Extract the two RRF files
@@ -445,7 +456,7 @@ def map_icd10_to_definitions(
     logger.info(f"Using MRDEF: {mrdef_path}")
 
     # Step 1: Extract ICD-10 codes
-    valid_codes = extract_icd10_codes(str(icd10_zip_path))
+    valid_codes, higher_order_codes = extract_icd10_codes(str(icd10_zip_path))
 
     # Step 2: Collect strings from MRCONSO
     code_to_cuis, code_to_strings = collect_strings_from_mrconso(
@@ -459,10 +470,7 @@ def map_icd10_to_definitions(
         all_cuis.update(cuis)
 
     # Step 4: Load definitions
-    cui_to_definitions = load_definitions_from_mrdef(
-        str(mrdef_path),
-        all_cuis
-    )
+    cui_to_definitions = load_definitions_from_mrdef(str(mrdef_path), all_cuis)
 
     # Step 5: Create mappings
     logger.info("\nCreating mappings...")
@@ -504,12 +512,37 @@ def map_icd10_to_definitions(
             "synonyms": [s["string"] for s in strings[:10]],
             "original_definition": definition,
         }
-
+    # Step 6: Add the higher order ICD 10 codes as lists of their sub-classes.
+    for higher_order_code in higher_order_codes.keys():
+        record = {
+            "code": [],
+            "name": [],
+            "definition": [],
+            "source": [],
+            "has_definition": [],
+            "num_cuis": [],
+            "num_strings": [],
+            "synonyms": [],
+            "original_definition": [],
+        }
+        for sub_code in sorted(higher_order_codes.get(higher_order_code, set())):
+            entry = icd10_data.get(sub_code, dict())
+            for key in entry.keys():
+                record[key].append(entry[key])
+        icd10_data[higher_order_code] = record
     # Statistics
     codes_with_defs = sum(1 for v in icd10_data.values() if v["has_definition"])
-    codes_with_synonyms = sum(
-        1 for v in icd10_data.values() if v["num_strings"] > 1
-    )
+    # small work around to deal with the presence of lists in the result
+    codes_with_synonyms = 0
+    for code in icd10_data.keys():
+        entry = icd10_data.get(code, dict())
+        num_strings = icd10_data.get("num_strings", 0)
+        if isinstance(num_strings, int):
+            codes_with_synonyms += num_strings > 1
+        elif isinstance(num_strings, list):
+            codes_with_synonyms += any([x > 1 for x in num_strings])
+        else:
+            raise ValueError("Expected either int or list")
 
     logger.info("\nResults:")
     logger.info("-" * 70)
@@ -524,9 +557,8 @@ def map_icd10_to_definitions(
         f"({codes_with_synonyms / len(icd10_data) * 100:.1f}%)"
     )
 
-    avg_length = (
-        sum(len(v["definition"]) for v in icd10_data.values())
-        / len(icd10_data)
+    avg_length = sum(len(v["definition"]) for v in icd10_data.values()) / len(
+        icd10_data
     )
     logger.info(f"  Average definition length: {avg_length:.1f} chars")
 
