@@ -253,7 +253,7 @@ def generate_icd10_embeddings(
 
     definitions_json = Path(EMBEDDINGS_BASE.base) / "icd10_code_to_definition.json"
 
-    icd10_data = map_icd10_to_definitions(
+    _ = map_icd10_to_definitions(
         mrconso_path=mrconso_path,
         mrdef_path=mrdef_path,
         output_json=str(definitions_json),
@@ -261,10 +261,7 @@ def generate_icd10_embeddings(
     )
 
     # Step 2 — Load definitions
-    codes, definitions, metadata = load_icd10_definitions(
-        definitions_json, verbose=verbose
-    )
-
+    codes, definitions, _ = load_icd10_definitions(definitions_json, verbose=verbose)
     # Step 3 — Load embeddings
     embeddings_file = Path(EMBEDDINGS_BASE.base) / "embeddings.npy"
 
@@ -281,7 +278,6 @@ def generate_icd10_embeddings(
     else:
         log_level("\nStep 3: Generating embeddings")
         log_level("-" * 70)
-
         embeddings = generate_embeddings(
             definitions,
             model_name=model_name,

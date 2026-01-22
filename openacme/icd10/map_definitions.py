@@ -82,8 +82,11 @@ def extract_icd10_codes(icd10_zip_path):
                         for rubric in class_elem.findall(".//Rubric"):
                             label = rubric.find("Label")
                             if label is not None:
-                                name = label.text
-                                break
+                                if (
+                                    label.text is not None
+                                ):  ## resolves 'Z31.2' edge case
+                                    name = label.text
+                                    break
                         if name:
                             icd10_codes[code] = name
                     else:
@@ -477,7 +480,6 @@ def map_icd10_to_definitions(
     logger.info("-" * 70)
 
     icd10_data = {}
-
     for code in valid_codes.keys():
         name = valid_codes[code]
         strings = code_to_strings.get(code, [])
