@@ -31,7 +31,7 @@ def load_icd10_definitions(json_file, verbose=True):
     Returns
     -------
     tuple
-        Tuple of (codes, definitions, metadata) lists.
+        Tuple of (codes, definitions, metadata, hierarchy) first 3 are lists, last one is dict
     """
     log_level = logger.info if verbose else logger.debug
     log_level(f"Loading ICD-10 definitions from {json_file}...")
@@ -42,13 +42,16 @@ def load_icd10_definitions(json_file, verbose=True):
     codes = []
     definitions = []
     metadata = []
-
+    hierarchy = {}  ## maps higher level codes to their descendants
     for code, entry in sorted(data.items()):
         codes.append(code)
         ## small work around to deal with the presence of lists in the json file in a type safe way.
         definition = entry["definition"]
         if isinstance(definition, list):
             definition = "; ".join(definition)
+            hierarchy[code] = entry.get(
+                "code"
+            )  ## in this case the code attribute stores a list of descendant codes
         assert isinstance(definition, str), "Definition must be parsable as a string"
         definitions.append(definition)
         metadata.append(
@@ -62,13 +65,16 @@ def load_icd10_definitions(json_file, verbose=True):
 
     log_level(f"  ✓ Loaded {len(codes)} ICD-10 codes")
 
-    return codes, definitions, metadata
+    return codes, definitions, metadata, hierarchy
 
 
 def generate_embeddings(
     definitions,
+    hierarchy: dict[str, list[str]],
+    codes: list,
     model_name=DEFAULT_MODEL,
     batch_size=DEFAULT_BATCH_SIZE,
+    average_high_order: bool = False,
     normalize=True,
     verbose=True,
 ):
@@ -78,11 +84,17 @@ def generate_embeddings(
     ----------
     definitions : list of str
         List of text definitions to generate embeddings for.
+    hierarchy : dict of list[str]
+        Mapping of high level icd-10 code to list of their descendants
+    codes : list
+        All ICD10 codes used for indexing embeddings
     model_name : str, optional
         Name of the sentence transformer model to use.
         Defaults to 'all-MiniLM-L6-v2'.
     batch_size : int, optional
         Batch size for encoding. Defaults to 32.
+    average_high_order: bool, optional
+        If to average higher order icd10 codes (if not embeds concatenation of descendants)
     normalize : bool, optional
         Whether to normalize embeddings. Defaults to True.
     verbose : bool, optional
@@ -114,7 +126,22 @@ def generate_embeddings(
         convert_to_numpy=True,
         normalize_embeddings=normalize,
     )
-
+    if average_high_order:
+        log_level(f"\nAveraging higher-level ICD10 code embeddings...")
+        for high_order_code in hierarchy:
+            high_order_idx = codes.index(high_order_code)
+            sub_code_idxs = [
+                codes.index(sub_code) for sub_code in hierarchy.get(high_order_code, [])
+            ]
+            if len(sub_code_idxs) < 1:
+                raise ValueError(
+                    f"ICD10 code {high_order_code} is not properly mapped to leaf nodes"
+                )
+            embeddings[high_order_idx] = embeddings[sub_code_idxs].mean(axis=0)
+            if normalize:
+                embeddings[high_order_idx] = embeddings[
+                    high_order_idx
+                ] / np.linalg.norm(embeddings[high_order_idx])
     log_level(f"  ✓ Generated embeddings shape: {embeddings.shape}")
     log_level(f"  ✓ Embedding dimension: {embeddings.shape[1]}")
 
@@ -212,6 +239,7 @@ def generate_icd10_embeddings(
     mrdef_path=None,
     umls_api_key=None,
     verbose=True,
+    average_high_order: bool = False,
 ):
     """Complete pipeline: Map definitions -> Generate embeddings -> Save.
 
@@ -233,7 +261,8 @@ def generate_icd10_embeddings(
         environment variable. Defaults to None.
     verbose : bool, optional
         Whether to print progress messages. Defaults to True.
-
+    average_high_order : bool, optional
+        If to set the embedding of a higher order ICD10 code (chapter, block, etc) as the average of its sub-classes. Otherwise, just concatenates all subclass detentions and embeds them.
     Returns
     -------
     pathlib.Path
@@ -261,7 +290,9 @@ def generate_icd10_embeddings(
     )
 
     # Step 2 — Load definitions
-    codes, definitions, _ = load_icd10_definitions(definitions_json, verbose=verbose)
+    codes, definitions, _, hierarchy = load_icd10_definitions(
+        definitions_json, verbose=verbose
+    )
     # Step 3 — Load embeddings
     embeddings_file = Path(EMBEDDINGS_BASE.base) / "embeddings.npy"
 
@@ -283,8 +314,10 @@ def generate_icd10_embeddings(
             model_name=model_name,
             batch_size=batch_size,
             verbose=verbose,
+            average_high_order=average_high_order,
+            codes=codes,
+            hierarchy=hierarchy,
         )
-
         embeddings_file = save_embeddings(
             embeddings,
             EMBEDDINGS_BASE.base,
