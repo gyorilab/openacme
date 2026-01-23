@@ -9,6 +9,7 @@ import shutil
 import os
 import logging
 import tqdm
+from collections import deque
 
 from lxml import etree as ET
 
@@ -82,9 +83,8 @@ def extract_icd10_codes(icd10_zip_path):
                         for rubric in class_elem.findall(".//Rubric"):
                             label = rubric.find("Label")
                             if label is not None:
-                                if (
-                                    label.text is not None
-                                ):  ## resolves 'Z31.2' edge case
+                                ## resolves 'Z31.2' edge case
+                                if label.text is not None:
                                     name = label.text
                                     break
                         if name:
@@ -95,7 +95,7 @@ def extract_icd10_codes(icd10_zip_path):
                             higher_order_codes[code] = {
                                 sub_class.attrib["code"]
                                 for sub_class in sub_classes
-                                if is_valid_diagnosis_code(sub_class.attrib["code"])
+                                if sub_class.attrib["code"]
                             }
 
     valid_codes = {
@@ -527,8 +527,20 @@ def map_icd10_to_definitions(
             "synonyms": [],
             "original_definition": [],
         }
-        for sub_code in sorted(higher_order_codes.get(higher_order_code, set())):
-            entry = icd10_data.get(sub_code, dict())
+        ## Traverse umls hierarchy to bottom using queue
+        code_queue = deque(sorted(higher_order_codes.get(higher_order_code, set())))
+        visited = set()
+        enteries = []
+        while code_queue:
+            sub_code = code_queue.popleft()
+            if sub_code in visited:
+                continue
+            visited.add(sub_code)
+            if sub_code in icd10_data:
+                enteries.append(icd10_data.get(sub_code, dict()))
+            elif sub_code in higher_order_codes:
+                code_queue.extend(sorted(higher_order_codes[sub_code]))
+        for entry in enteries:
             for key in entry.keys():
                 record[key].append(entry[key])
         icd10_data[higher_order_code] = record
