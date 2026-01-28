@@ -18,23 +18,20 @@ DEFAULT_BATCH_SIZE = 32
 logger = logging.getLogger(__name__)
 
 
-def load_icd10_definitions(json_file, verbose=True):
+def load_icd10_definitions(json_file):
     """Load ICD-10 code to definition mappings from JSON file.
 
     Parameters
     ----------
     json_file : str
         Path to JSON file containing ICD-10 code to definition mappings.
-    verbose : bool, optional
-        Whether to print progress messages. Defaults to True.
 
     Returns
     -------
     tuple
         Tuple of (codes, definitions, metadata, hierarchy) first 3 are lists, last one is dict
     """
-    log_level = logger.info if verbose else logger.debug
-    log_level(f"Loading ICD-10 definitions from {json_file}...")
+    logger.debug(f"Loading ICD-10 definitions from {json_file}...")
 
     with open(json_file, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -63,7 +60,7 @@ def load_icd10_definitions(json_file, verbose=True):
             }
         )
 
-    log_level(f"  ✓ Loaded {len(codes)} ICD-10 codes")
+    logger.debug(f"Loaded {len(codes)} ICD-10 codes")
 
     return codes, definitions, metadata, hierarchy
 
@@ -76,7 +73,6 @@ def generate_embeddings(
     batch_size=DEFAULT_BATCH_SIZE,
     average_high_order: bool = False,
     normalize=True,
-    verbose=True,
 ):
     """Generate embeddings for definitions using sentence transformers.
 
@@ -97,8 +93,6 @@ def generate_embeddings(
         If to average higher order icd10 codes (if not embeds concatenation of descendants)
     normalize : bool, optional
         Whether to normalize embeddings. Defaults to True.
-    verbose : bool, optional
-        Whether to print progress messages. Defaults to True.
 
     Returns
     -------
@@ -111,18 +105,18 @@ def generate_embeddings(
             "sentence-transformers not installed. "
             "Install with: pip install sentence-transformers"
         )
-    log_level = logger.info if verbose else logger.debug
 
-    log_level(f"\nLoading sentence transformer model: {model_name}...")
+    logger.debug(f"Loading sentence transformer model: {model_name}...")
 
     model = SentenceTransformer(model_name)
 
-    log_level(f"  ✓ Model loaded (max_seq_length: {model.max_seq_length})")
-    log_level(f"\nGenerating embeddings (batch_size={batch_size})...")
+    logger.debug(f"Model loaded (max_seq_length: {model.max_seq_length})")
+    logger.debug(f"Generating embeddings (batch_size={batch_size})...")
+
     embeddings = model.encode(
         definitions,
         batch_size=batch_size,
-        show_progress_bar=verbose,
+        show_progress_bar=True,
         convert_to_numpy=True,
         normalize_embeddings=normalize,
     )
@@ -142,8 +136,9 @@ def generate_embeddings(
                 embeddings[high_order_idx] = embeddings[
                     high_order_idx
                 ] / np.linalg.norm(embeddings[high_order_idx])
-    log_level(f"  ✓ Generated embeddings shape: {embeddings.shape}")
-    log_level(f"  ✓ Embedding dimension: {embeddings.shape[1]}")
+
+    logger.debug(f"Generated embeddings shape: {embeddings.shape}")
+    logger.debug(f"Embedding dimension: {embeddings.shape[1]}")
 
     return embeddings
 
@@ -151,7 +146,6 @@ def generate_embeddings(
 def save_embeddings(
     embeddings,
     output_dir,
-    verbose=True,
 ):
     """Save embeddings to output directory.
 
@@ -161,23 +155,20 @@ def save_embeddings(
         Array of embeddings to save.
     output_dir : str
         Directory path to save embeddings.
-    verbose : bool, optional
-        Whether to print progress messages. Defaults to True.
 
     Returns
     -------
     pathlib.Path
         Path to saved embeddings.npy file.
     """
-    log_level = logger.info if verbose else logger.debug
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
 
-    log_level(f"\nSaving embeddings to {output_dir}...")
+    logger.debug(f"Saving embeddings to {output_dir}...")
 
     embeddings_file = output_dir / "embeddings.npy"
     np.save(embeddings_file, embeddings)
-    log_level(f"  ✓ Saved embeddings: {embeddings_file}")
+    logger.debug(f"Saved embeddings: {embeddings_file}")
 
     return embeddings_file
 
@@ -225,7 +216,7 @@ def load_embeddings(embeddings_base=None):
     embeddings_file = Path(embeddings_base.base) / "embeddings.npy"
     definitions_file = Path(embeddings_base.base) / "icd10_code_to_definition.json"
 
-    embeddings = np.load(str(embeddings_file))
+    embeddings = np.load(embeddings_file.as_posix())
     with open(definitions_file, "r", encoding="utf-8") as f:
         definitions_data = json.load(f)
 
@@ -238,7 +229,6 @@ def generate_icd10_embeddings(
     mrconso_path=None,
     mrdef_path=None,
     umls_api_key=None,
-    verbose=True,
     average_high_order: bool = False,
 ):
     """Complete pipeline: Map definitions -> Generate embeddings -> Save.
@@ -259,61 +249,52 @@ def generate_icd10_embeddings(
     umls_api_key : str, optional
         UMLS API key for downloading data. If None, uses UMLS_API_KEY
         environment variable. Defaults to None.
-    verbose : bool, optional
-        Whether to print progress messages. Defaults to True.
     average_high_order : bool, optional
         If to set the embedding of a higher order ICD10 code (chapter, block, etc) as the average of its sub-classes. Otherwise, just concatenates all subclass detentions and embeds them.
+
     Returns
     -------
     pathlib.Path
         Path to saved embeddings.npy file.
     """
-    log_level = logger.info if verbose else logger.debug
     from .map_definitions import map_icd10_to_definitions
 
-    log_level("=" * 70)
-    log_level("ICD-10 Code -> Definition -> Embedding Pipeline")
-    log_level("=" * 70)
-    log_level(f"\nOutput directory: {EMBEDDINGS_BASE.base}")
+    logger.debug(f"Output directory: {EMBEDDINGS_BASE.base}")
 
     # Step 1 — Map ICD-10 codes to definitions
-    log_level("\nStep 1: Mapping ICD-10 codes to definitions")
-    log_level("-" * 70)
+    logger.debug("Step 1: Mapping ICD-10 codes to definitions")
 
     definitions_json = Path(EMBEDDINGS_BASE.base) / "icd10_code_to_definition.json"
 
     _ = map_icd10_to_definitions(
         mrconso_path=mrconso_path,
         mrdef_path=mrdef_path,
-        output_json=str(definitions_json),
+        output_json=definitions_json.as_posix(),
         umls_api_key=umls_api_key,
     )
 
     # Step 2 — Load definitions
     codes, definitions, _, hierarchy = load_icd10_definitions(
-        definitions_json, verbose=verbose
+        definitions_json
     )
     # Step 3 — Load embeddings
     embeddings_file = Path(EMBEDDINGS_BASE.base) / "embeddings.npy"
 
     if embeddings_file.is_file():
-        log_level("\nStep 3: Loading existing embeddings")
-        log_level("-" * 70)
-        log_level(f"✓ Embeddings file already exists — loading from cache")
-        log_level(f"  File: {embeddings_file}")
+        logger.debug("Step 3: Loading existing embeddings")
+        logger.debug(f"Embeddings file already exists — loading from {embeddings_file}")
 
-        embeddings = np.load(str(embeddings_file))
+        embeddings = np.load(embeddings_file.as_posix())
 
-        log_level(f"  ✓ Loaded embeddings shape: {embeddings.shape}")
-        log_level(f"  ✓ Loaded definitions for {len(codes)} codes")
+        logger.debug(f"Loaded embeddings shape: {embeddings.shape}")
+        logger.debug(f"Loaded definitions for {len(codes)} codes")
     else:
-        log_level("\nStep 3: Generating embeddings")
-        log_level("-" * 70)
+        logger.debug("Step 3: Generating embeddings")
+
         embeddings = generate_embeddings(
             definitions,
             model_name=model_name,
             batch_size=batch_size,
-            verbose=verbose,
             average_high_order=average_high_order,
             codes=codes,
             hierarchy=hierarchy,
@@ -321,21 +302,17 @@ def generate_icd10_embeddings(
         embeddings_file = save_embeddings(
             embeddings,
             EMBEDDINGS_BASE.base,
-            verbose=verbose,
         )
 
-    log_level("\n" + "=" * 70)
-    log_level("✓ Pipeline Complete!")
-    log_level("=" * 70)
-    log_level("\nSummary:")
-    log_level(f"  Total codes processed: {len(codes):,}")
-    log_level(f"  Embedding dimension: {embeddings.shape[1]}")
-    log_level(f"  Embeddings shape: {embeddings.shape}")
-    log_level(f"\nAll files saved to: {EMBEDDINGS_BASE.base}/")
-    log_level("  - embeddings.npy")
-    log_level("  - icd10_code_to_definition.json")
-    log_level("\nYou can reconstruct code index with:")
-    log_level("  from openacme.generate_embeddings import get_code_index")
-    log_level("  code_index = get_code_index(definitions_data)")
+    logger.debug("Summary:")
+    logger.debug(f"  Total codes processed: {len(codes):,}")
+    logger.debug(f"  Embedding dimension: {embeddings.shape[1]}")
+    logger.debug(f"  Embeddings shape: {embeddings.shape}")
+    logger.debug(f"All files saved to: {EMBEDDINGS_BASE.base}/")
+    logger.debug("  - embeddings.npy")
+    logger.debug("  - icd10_code_to_definition.json")
+    logger.debug("You can reconstruct code index with:")
+    logger.debug("  from openacme.generate_embeddings import get_code_index")
+    logger.debug("  code_index = get_code_index(definitions_data)")
 
     return embeddings_file
