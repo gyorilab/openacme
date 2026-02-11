@@ -1,3 +1,9 @@
+"""This module implements processing ACME table D, which lists the ICD-10
+codes that link codes based on possible underlying  causes of death.
+The resulting graph can be used to expand the set of causes of death
+associated with a given underlying cause of death, which is useful
+for grounding clinical text to causes of death."""
+
 import networkx as nx
 import tqdm
 from bs4 import BeautifulSoup
@@ -8,6 +14,7 @@ ACME_URL = "https://www.cdc.gov/nchs/nvss/manuals/2024/2c-2024-raw.html"
 
 
 def standardize_icd10(raw_code):
+    """Return standardized ICD10 codes from e.g., A251 to A25.1"""
     # If the code is a letter followed by 3 numbers, we assume
     # that the last number should be separated by a .
     if len(raw_code) == 4 and raw_code[0].isalpha() and raw_code[1:4].isdigit():
@@ -16,7 +23,10 @@ def standardize_icd10(raw_code):
 
 
 def process_icd10_range(raw_range):
-    # Process A251\xa0\xa0 -A259 into
+    """Process raw ICD10 range strings into tuples.
+
+    Example: "A25.1-A25.9" -> ("A25.1", "A25.9")
+    """
     # ('A25.1', 'A25.9')
     parts = raw_range.split('-')
     if len(parts) == 1:
@@ -31,6 +41,11 @@ def process_icd10_range(raw_range):
 
 
 def process_table_d(icd10_graph, soup):
+    """Return a graph representation of ACME relations from Table D.
+
+    The graph will have nodes for both individual ICD-10 codes and ranges of
+    codes, and edges from codes to their associated underlying causes of death.
+    """
     # Find the TableD section
     # <p class="H1" data-msection="Section_01" id="em_0010250">Table D<br /> ...
     table_d_header = None
@@ -88,12 +103,19 @@ def process_table_d(icd10_graph, soup):
 
 
 def get_acme_graph():
+    """Return a graph representation of ACME Table D."""
+    # This downloads the HTML if not already there or uses a cached version.
     acme_file = ICD10_BASE.ensure(url=ACME_URL)
+
+    # Parse the HTML and instantiate the soup object
     with open(acme_file, 'r') as fh:
         acme_text = fh.read()
-    g = get_icd10_graph()
     soup = BeautifulSoup(acme_text, features='lxml')
 
+    # Get the base ICD-10 graph to use for expanding ranges
+    g = get_icd10_graph()
+
+    # Process Table D to get the ACME graph
     acme_g = process_table_d(g, soup)
     return acme_g
 
