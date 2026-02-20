@@ -424,7 +424,7 @@ def map_icd10_to_definitions(
 
     # Use EMBEDDINGS_BASE for output if not specified
     if output_json is None:
-        output_json = EMBEDDINGS_BASE.join("icd10_code_to_definition.json")
+        output_json = Path(EMBEDDINGS_BASE.base) / "icd10_code_to_definition.json"
     output_json = Path(output_json)
 
     # Short-circuit: if output file already exists, load and return
