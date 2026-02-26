@@ -30,10 +30,22 @@ ICD10_BASE = OPENACME_BASE.module('icd10')
 ICD10_XML_URL = "https://icdcdn.who.int/icd10/claml/icd102019en.xml.zip"
 
 
+def _icd10_sort_key(c):
+    """Sort by (letter, category, subcategory) for correct decimal ordering: A00.9 < A00.10."""
+    if len(c) < 2:
+        return (c, -1, -1)
+    letter, rest = c[0], c[1:]
+    cat, *sub = rest.split('.')
+    try:
+        return (letter, int(cat), int(sub[0]) if sub else 0)
+    except ValueError:
+        return (letter, -1, -1)
+
+
 def expand_icd10_range(g, start, end):
     # Return a list of all codes between e.g.,
     # ('Y43.1', 'Y43.4') or ('C00.0', 'C97')
-    codes = sorted(g.nodes)
+    codes = sorted(g.nodes, key=_icd10_sort_key)
     in_range = []
     in_range_flag = False
     end_is_super_class = ('.' not in end)
@@ -41,9 +53,11 @@ def expand_icd10_range(g, start, end):
         if code == start:
             in_range_flag = True
         if in_range_flag:
-            in_range.append(code)
-        if code == end or (end_is_super_class and code.startswith(end)):
-            break
+            # Only add codes to the range, not blocks or chapters
+            if g.nodes[code].get('type') == 'code':
+                in_range.append(code)
+            if code == end or (end_is_super_class and code.startswith(end)):
+                break
     return in_range
 
 
@@ -77,7 +91,8 @@ def get_icd10_graph():
             name = name.strip() if name else None
             if name:
                 rubric_data[rubric_kind].append(name)
-        nodes.append([code, {'kind': kind, 'rubrics': dict(rubric_data)}])
+        node_type = 'code' if kind == 'category' else ('block' if kind == 'block' else 'chapter')
+        nodes.append([code, {'kind': kind, 'type': node_type, 'rubrics': dict(rubric_data)}])
 
     g = nx.DiGraph()
     g.add_nodes_from(nodes)
