@@ -1,4 +1,6 @@
-from openacme.icd10 import get_icd10_graph, expand_icd10_range
+import networkx as nx
+
+from openacme.icd10 import expand_icd10_range, get_icd10_graph
 
 
 def test_expand_range1():
@@ -17,3 +19,16 @@ def test_expand_range2():
     assert 'C50.9' in codes
     assert 'C34.1' in codes
     assert 'C98' not in codes
+    assert 'C97-C97' not in codes  # blocks excluded
+
+
+def test_expand_range_decimal_ordering():
+    """Sort uses (letter, category, subcategory) so A00.9 < A00.10 (numeric, not lexicographic)."""
+    # WHO graph has no .10 codes; use mock to test decimal ordering
+    g = nx.DiGraph()
+    for code in ['A00.0', 'A00.1', 'A00.9', 'A00.10']:
+        g.add_node(code, type='code')
+    codes = expand_icd10_range(g, 'A00.0', 'A00.10')
+    assert 'A00.9' in codes
+    assert 'A00.10' in codes
+    assert codes.index('A00.9') < codes.index('A00.10')
