@@ -43,6 +43,14 @@ def test_process_range_with_M():
     assert r['asterisk'] is False
 
 
+def test_process_range_M_block_not_qualifier():
+    """M-block codes (M02.1, M02.1-M02.9) are ICD-10 codes, not M qualifier."""
+    r = process_icd10_range('M02.1-M02.9')
+    assert r['start'] == 'M02.1'
+    assert r['end'] == 'M02.9'
+    assert r['M'] is False
+
+
 def test_process_range_with_asterisk():
     r = process_icd10_range('Y560-Y569  *')
     assert r['start'] == 'Y56.0'

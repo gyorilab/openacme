@@ -28,9 +28,9 @@ def standardize_icd10(raw_code):
 
 def process_icd10_range(raw_range):
     """Process raw ICD10 range strings. Returns dict with code or start/end plus M, asterisk."""
-    # We assume that a range can start with an M and/or end with an asterisk
+    # M qualifier: "M " + code (M followed by whitespace).
     s = raw_range.strip()
-    has_M = s.startswith('M')
+    has_M = len(s) > 1 and s[0] == 'M' and s[1].isspace()
     has_asterisk = s.endswith('*')
     s = s.replace('*', '').strip()
     if has_M:
@@ -95,16 +95,17 @@ def process_table_d(icd10_graph, soup):
         return src['code'] if 'code' in src else (src['start'], src['end'])
 
     nodes = [(n, {'type': 'range' if isinstance(n, tuple) else 'code'})
-             for n in ({part['target'] for part in parts} |
-                       {_source_node(part['source']) for part in parts})]
+             for n in tqdm.tqdm({part['target'] for part in parts} |
+                       {_source_node(part['source']) for part in parts}, desc="Processing ACME Table D nodes")]
     edges = []
-    for part in parts:
+    for part in tqdm.tqdm(parts, desc="Processing ACME Table D edges"):
         src = part['source']
         node = _source_node(src)
         edge_attrs = {'kind': 'causes', 'M': src.get('M', False), 'asterisk': src.get('asterisk', False)}
         edges.append((node, part['target'], edge_attrs))
         if 'start' in src and 'end' in src:
             codes_in_range = expand_icd10_range(icd10_graph, src['start'], src['end'])
+            codes_in_range = sorted(codes_in_range)
             for code in codes_in_range:
                 edges.append((code, node, {'kind': 'part_of_range'}))
     g = nx.DiGraph()

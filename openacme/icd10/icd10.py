@@ -17,8 +17,9 @@ with decimal points. For example:
 Chapter (I) -> Block (A00-A09) -> Category (A00) -> Category (A00.0)
 """
 __all__ = ['ICD10_BASE', 'ICD10_XML_URL', 'get_icd10_graph',
-           'expand_icd10_range']
+           'convert_icd10_code_to_range', 'expand_icd10_range']
 
+import re
 import zipfile
 from lxml import etree
 from collections import defaultdict
@@ -30,36 +31,50 @@ ICD10_BASE = OPENACME_BASE.module('icd10')
 ICD10_XML_URL = "https://icdcdn.who.int/icd10/claml/icd102019en.xml.zip"
 
 
-def _icd10_sort_key(c):
-    """Sort by (letter, category, subcategory) for correct decimal ordering: A00.9 < A00.10."""
-    if len(c) < 2:
-        return (c, -1, -1)
-    letter, rest = c[0], c[1:]
-    cat, *sub = rest.split('.')
-    try:
-        return (letter, int(cat), int(sub[0]) if sub else 0)
-    except ValueError:
-        return (letter, -1, -1)
+def convert_icd10_code_to_range(s):
+    """Convert ICD-10 code/block/chapter to (letter, maj, min, letter, maj, min).
+    Use inf for unbounded end. Examples:
+    - A12.10 (code) -> (A, 12, 10, A, 12, 10)
+    - C97 (block) -> (C, 97, 0, C, 97, inf)
+    - C97-C98 (range) -> (C, 97, 0, C, 98, inf)
+    - C (chapter) -> (C, 0, 0, C, inf, inf)
+    """
+
+    def _parse_part(s, *, for_end=False):
+        """Parse single code to (letter, category, subcategory). for_end=True uses inf for unbounded."""
+        if len(s) == 1 and s.isalpha():
+            return (s.upper(), 0, 0) if not for_end else (s.upper(), float('inf'), float('inf'))
+        m = re.match(r'^([A-Z])(\d{2,3})(?:\.(\d+))?$', s, re.I)
+        if not m:
+            raise ValueError(f"Cannot parse ICD-10 code: {s}")
+        letter, cat, subcat = m.group(1).upper(), int(m.group(2)), m.group(3)
+        subcat_val = int(subcat) if subcat else (float('inf') if for_end else 0)
+        return (letter, cat, subcat_val)
+
+    s = s.strip()
+    if '-' in s and not s.startswith('-'):
+        start_s, end_s = s.split('-', 1)
+        start_s, end_s = start_s.strip(), end_s.strip()
+        return (*_parse_part(start_s, for_end=False), *_parse_part(end_s, for_end=True))
+    return (*_parse_part(s, for_end=False), *_parse_part(s, for_end=True))
 
 
-def expand_icd10_range(g, start, end):
-    # Return a list of all codes between e.g.,
-    # ('Y43.1', 'Y43.4') or ('C00.0', 'C97')
-    codes = sorted(g.nodes, key=_icd10_sort_key)
-    in_range = []
-    in_range_flag = False
-    end_is_super_class = ('.' not in end)
-    for code in codes:
-        if code == start:
-            in_range_flag = True
-        if in_range_flag:
-            # Only add codes to the range, not blocks or chapters
-            if g.nodes[code].get('type') == 'code':
-                in_range.append(code)
-            if code == end or (end_is_super_class and code.startswith(end)):
-                break
-    return in_range
+def expand_icd10_range(icd10_graph, start, end):
+    """Return codes in [start, end]. Uses convert_icd10_code_to_range for comparison."""
+    query_r = convert_icd10_code_to_range(f"{start}-{end}")
+    query_start = query_r[:3]
+    query_end = query_r[3:]
 
+    codes_in_range = []
+    for code in icd10_graph.nodes:
+        if icd10_graph.nodes[code].get('type') != 'code':
+            continue
+        code_r = convert_icd10_code_to_range(code)
+        code_start = code_r[:3]
+        code_end = code_r[3:]
+        if query_start <= code_start and code_end <= query_end:
+            codes_in_range.append(code)
+    return codes_in_range
 
 def get_icd10_graph():
     zip_path = ICD10_BASE.ensure(url=ICD10_XML_URL)

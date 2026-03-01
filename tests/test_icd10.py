@@ -23,8 +23,8 @@ def test_expand_range2():
 
 
 def test_expand_range_decimal_ordering():
-    """Sort uses (letter, category, subcategory) so A00.9 < A00.10 (numeric, not lexicographic)."""
-    # WHO graph has no .10 codes; use mock to test decimal ordering
+    """Sort uses (prefix, sub as int) so A00.9 < A00.10 (numeric, not lexicographic)."""
+    # Use a minimal graph with just these codes for this test
     g = nx.DiGraph()
     for code in ['A00.0', 'A00.1', 'A00.9', 'A00.10']:
         g.add_node(code, type='code')
