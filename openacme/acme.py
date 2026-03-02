@@ -8,7 +8,7 @@ import networkx as nx
 import tqdm
 from bs4 import BeautifulSoup
 
-from .icd10 import ICD10_BASE, expand_icd10_range, get_icd10_graph
+from .icd10 import ICD10_BASE, sort_icd10_graph_codes_and_blocks, expand_icd10_range, get_icd10_graph
 
 ACME_URL = "https://www.cdc.gov/nchs/nvss/manuals/2024/2c-2024-raw.html"
 
@@ -19,23 +19,31 @@ def standardize_icd10(raw_code):
     # that the last number should be separated by a .
     if len(raw_code) == 4 and raw_code[0].isalpha() and raw_code[1:4].isdigit():
         return f"{raw_code[0]}{raw_code[1:3]}.{raw_code[3]}"
+    # If the code is a letter followed by 4 numbers, we assume
+    # that the last two numbers should be separated by a .
+    if len(raw_code) == 5 and raw_code[0].isalpha() and raw_code[1:5].isdigit():
+        return f"{raw_code[0]}{raw_code[1:3]}.{raw_code[3:]}"
     return raw_code
 
 
 def process_icd10_range(raw_range):
-    """Process raw ICD10 range strings into tuples.
-
-    Example: "A25.1-A25.9" -> ("A25.1", "A25.9")
-    """
-    # ('A25.1', 'A25.9')
-    parts = raw_range.split('-')
+    """Process raw ICD10 range strings. Returns dict with code or start/end plus M, asterisk."""
+    # M qualifier: "M " + code (M followed by whitespace).
+    s = raw_range.strip()
+    has_M = len(s) > 1 and s[0] == 'M' and s[1].isspace()
+    has_asterisk = s.endswith('*')
+    s = s.replace('*', '').strip()
+    if has_M:
+        s = s[1:].lstrip()
+    # Return a dictionary with the code or start/end plus M, asterisk
+    parts = s.split('-')
     if len(parts) == 1:
         code = standardize_icd10(parts[0].strip())
-        return code
+        return {"code": code, "M": has_M, "asterisk": has_asterisk}
     elif len(parts) == 2:
         start = standardize_icd10(parts[0].strip())
         end = standardize_icd10(parts[1].strip())
-        return start, end
+        return {"start": start, "end": end, "M": has_M, "asterisk": has_asterisk}
     else:
         assert False, f"Unexpected ICD-10 range: {raw_range}"
 
@@ -82,20 +90,24 @@ def process_table_d(icd10_graph, soup):
                 "target": current_h3,
                 "source": source
             })
+
+    def _source_node(src):
+        return src['code'] if 'code' in src else (src['start'], src['end'])
+
     nodes = [(n, {'type': 'range' if isinstance(n, tuple) else 'code'})
-             for n in ({part['target'] for part in parts} |
-                       {part['source'] for part in parts})]
+             for n in tqdm.tqdm({part['target'] for part in parts} |
+                       {_source_node(part['source']) for part in parts}, desc="Processing ACME Table D nodes")]
     edges = []
-    for part in parts:
-        edge = (part['source'], part['target'], {'kind': 'causes'})
-        edges.append(edge)
-        if isinstance(part['source'], tuple):
-            # Expand range
-            codes_in_range = expand_icd10_range(
-                icd10_graph, part['source'][0], part['source'][1]
-            )
-            for code in codes_in_range:
-                edges.append((code, part['source'], {'kind': 'part_of_range'}))
+    sorted_codes_and_blocks = sort_icd10_graph_codes_and_blocks(icd10_graph) # Sort icd10 graph only once
+    for part in tqdm.tqdm(parts, desc="Processing ACME Table D edges"):
+        src = part['source']
+        node = _source_node(src)
+        edge_attrs = {'kind': 'causes', 'M': src.get('M', False), 'asterisk': src.get('asterisk', False)}
+        edges.append((node, part['target'], edge_attrs))
+        if 'start' in src and 'end' in src:
+            codes_and_blocks_in_range = expand_icd10_range(sorted_codes_and_blocks, src['start'], src['end'])
+            for code_or_block in codes_and_blocks_in_range:
+                edges.append((code_or_block, node, {'kind': 'part_of_range'}))
     g = nx.DiGraph()
     g.add_nodes_from(nodes)
     g.add_edges_from(edges)
