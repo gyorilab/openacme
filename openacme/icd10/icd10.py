@@ -35,22 +35,25 @@ def convert_icd10_code_to_range(s):
     """Convert ICD-10 code/block/chapter to (letter, maj, min, letter, maj, min).
     Use inf for unbounded end. Examples:
     - A12.10 (code) -> (A, 12, 10, A, 12, 10)
-    - C97 (block) -> (C, 97, 0, C, 97, inf)
-    - C97-C98 (range) -> (C, 97, 0, C, 98, inf)
-    - C (chapter) -> (C, 0, 0, C, inf, inf)
+    - C97 (code) -> (C, 97, 0, C, 97, inf)
+    - C97-C98 (block) -> (C, 97, 0, C, 98, inf)
     """
 
     def _parse_part(s, *, for_end=False):
         """Parse single code to (letter, category, subcategory). for_end=True uses inf for unbounded."""
+        # If the code is a single letter, e.g. 'C', return (C, 0, 0) or (C, inf, inf) for unbounded
         if len(s) == 1 and s.isalpha():
             return (s.upper(), 0, 0) if not for_end else (s.upper(), float('inf'), float('inf'))
+        # Regex for code format: letter, 2-3 digits, optional decimal point and 1-3 digits
         m = re.match(r'^([A-Z])(\d{2,3})(?:\.(\d+))?$', s, re.I)
         if not m:
             raise ValueError(f"Cannot parse ICD-10 code: {s}")
+        # Convert to a 3-tuple of (letter, category, subcategory)
         letter, cat, subcat = m.group(1).upper(), int(m.group(2)), m.group(3)
         subcat_val = int(subcat) if subcat else (float('inf') if for_end else 0)
         return (letter, cat, subcat_val)
 
+    # If the code is a block type (i.e. range of codes), e.g. 'C97-C98', split into start and end and parse each part
     s = s.strip()
     if '-' in s and not s.startswith('-'):
         start_s, end_s = s.split('-', 1)
@@ -58,23 +61,38 @@ def convert_icd10_code_to_range(s):
         return (*_parse_part(start_s, for_end=False), *_parse_part(end_s, for_end=True))
     return (*_parse_part(s, for_end=False), *_parse_part(s, for_end=True))
 
+def sort_icd10_graph_codes_and_blocks(icd10_graph):
+    """Sort ICD-10 graph nodes as ranges. Sort in terms of start of range.
+    For example, A01 < A00-A09 < A03-Z05 < A04
+    """
+    codes_or_blocks_tuples = [] # e.g. [('A01', (A, 0, 1, A, inf, inf)), ('A00-A09', (A, 0, 0, A, 0, 9, A, inf, inf)), ...]
+    for node in icd10_graph.nodes:
+        if (icd10_graph.nodes[node].get('type') == 'code' 
+            or icd10_graph.nodes[node].get('type') == 'block'):
+            codes_or_blocks_tuples.append((node, convert_icd10_code_to_range(node)))
+    return sorted(codes_or_blocks_tuples, key=lambda c: c[1][:3])
+    
 
-def expand_icd10_range(icd10_graph, start, end):
+def expand_icd10_range(sorted_codes_and_blocks, start, end):
     """Return codes in [start, end]. Uses convert_icd10_code_to_range for comparison."""
+    # Convert start and end to a range tuple
     query_r = convert_icd10_code_to_range(f"{start}-{end}")
     query_start = query_r[:3]
     query_end = query_r[3:]
 
-    codes_in_range = []
-    for code in icd10_graph.nodes:
-        if icd10_graph.nodes[code].get('type') != 'code':
-            continue
-        code_r = convert_icd10_code_to_range(code)
-        code_start = code_r[:3]
-        code_end = code_r[3:]
-        if query_start <= code_start and code_end <= query_end:
-            codes_in_range.append(code)
-    return codes_in_range
+    # Iterate over sorted codes and blocks and check if they are in the range
+    codes_and_blocks_in_range = []
+    for c in sorted_codes_and_blocks:
+        code_start = c[1][:3]
+        code_end = c[1][3:]
+        # Sorted by start; stop once we've passed the query end
+        if code_start > query_end:
+            break
+        # Include if code/block is contained in query range
+        if code_start >= query_start and code_end <= query_end:
+            codes_and_blocks_in_range.append(c[0])
+
+    return codes_and_blocks_in_range
 
 def get_icd10_graph():
     zip_path = ICD10_BASE.ensure(url=ICD10_XML_URL)

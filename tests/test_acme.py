@@ -20,6 +20,17 @@ def test_standardize_category_only():
     assert standardize_icd10('C97') == 'C97'
 
 
+def test_standardize_with_decimal_unchanged():
+    """Codes with decimal already in place pass through."""
+    assert standardize_icd10('A25.10') == 'A25.10'
+
+
+def test_standardize_non_matching_unchanged():
+    """Codes that don't match 4 or 5 digit pattern pass through."""
+    assert standardize_icd10('A2') == 'A2'
+    assert standardize_icd10('A12345') == 'A12345'  # 6 chars, no match
+
+
 # --- process_icd10_range ---
 
 
@@ -64,3 +75,28 @@ def test_process_range_with_M_and_asterisk():
     assert r['code'] == 'R75'
     assert r['M'] is True
     assert r['asterisk'] is True
+
+
+def test_process_range_M_with_range():
+    """M qualifier with a range."""
+    r = process_icd10_range('M A25.1-A25.9')
+    assert r['start'] == 'A25.1'
+    assert r['end'] == 'A25.9'
+    assert r['M'] is True
+    assert r['asterisk'] is False
+
+
+def test_process_range_M_single_space():
+    """M with single space after."""
+    r = process_icd10_range('M R75')
+    assert r['code'] == 'R75'
+    assert r['M'] is True
+
+
+def test_process_range_asterisk_only():
+    """Asterisk without M."""
+    r = process_icd10_range('Y560-Y569*')
+    assert r['start'] == 'Y56.0'
+    assert r['end'] == 'Y56.9'
+    assert r['asterisk'] is True
+    assert r['M'] is False
