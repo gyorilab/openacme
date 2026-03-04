@@ -7,6 +7,7 @@ for grounding clinical text to causes of death."""
 import networkx as nx
 import tqdm
 from bs4 import BeautifulSoup
+import re
 
 from .icd10 import ICD10_BASE, expand_icd10_range, get_icd10_graph
 
@@ -15,11 +16,26 @@ ACME_URL = "https://www.cdc.gov/nchs/nvss/manuals/2024/2c-2024-raw.html"
 
 def standardize_icd10(raw_code):
     """Return standardized ICD10 codes from e.g., A251 to A25.1"""
+    # If the code is 3 characters long, just return it. E.g. A25 -> A25
+    if len(raw_code) == 3:
+        return raw_code
     # If the code is a letter followed by 3 numbers, we assume
     # that the last number should be separated by a .
-    if len(raw_code) == 4 and raw_code[0].isalpha() and raw_code[1:4].isdigit():
+    elif len(raw_code) == 4 and raw_code[0].isalpha() \
+        and raw_code[1:4].isdigit():
         return f"{raw_code[0]}{raw_code[1:3]}.{raw_code[3]}"
-    return raw_code
+    # If the code is a letter followed by 4 numbers, and the last number is 0
+    # normalize it. E0390 -> E03.9 
+    # Note: the 5 character subcategories are for use in coding and processing 
+    # multiple cause data; however they do not appear in the official 
+    # tabulations. See the `D. CREATED CODES` section of the `Instructions for 
+    # Classifying the Underlying Cause-of-Death, ICD-10, 2025`. 
+    # From the link: https://www.cdc.gov/nchs/nvss/manuals/2025/2a-2025.html
+    elif len(raw_code) == 5 and raw_code[0].isalpha() and \
+        raw_code[1:4].isdigit() and raw_code[4] == '0':
+        return f"{raw_code[0]}{raw_code[1:3]}.{raw_code[3]}"
+    else:
+        assert False, f"Unexpected ICD-10 code: {raw_code}"
 
 
 def process_icd10_range(raw_range):
@@ -76,7 +92,19 @@ def process_table_d(icd10_graph, soup):
             )
             continue
         elif 'TableDRow' in classes:
-            source = process_icd10_range(tag.get_text(" ", strip=True))
+            # Strip leading and trailing whitespace from the tag text.
+            tag_text = tag.get_text(" ", strip=True)
+            # Strip leading 'M' when it is followed by whitespace.
+            # E.g. 'M   A25.1-A25.9' -> 'A25.1-A25.9'
+            # Note: We could also add 'M' which means that the source "maybe"
+            # the cause of the target, to the edge of 'causes' kind. 
+            tag_text = re.sub(r'^M\s+', '', tag_text)
+            # Strip trailing '*' when it is preceded by whitespace.
+            # E.g. 'A25.1-A25.9  *' -> 'A25.1-A25.9'
+            # Note: The trailing '*' likely is a revision marker from prior 
+            # table, not a medically derived categorization.
+            tag_text = re.sub(r'\s+\*$', '', tag_text)
+            source = process_icd10_range(tag_text)
             parts.append({
                 "block": current_h2,
                 "target": current_h3,
