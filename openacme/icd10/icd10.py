@@ -56,6 +56,29 @@ def get_icd10_graph():
         with zf.open(xml_name) as fh:
             tree = etree.parse(fh)
 
+    # Preprocess modifiers that we can later reference
+    modifier_tags = tree.findall('Modifier')
+    modifier_class_tags = tree.findall('ModifierClass')
+    modifier_classes = defaultdict(dict)
+    # We differentiate codes that end in _4 and _5 because
+    # _4-level modifiers are used as part of ICD10 codes whereas
+    # _5-level modifiers are supposed to be represented separately from codes.
+    modifier_types = {}
+    for m in modifier_class_tags:
+        # Note that level 4 codes include a prepended . like .9 whereas
+        # level 5 codes do not contain this period prefix
+        code = m.attrib['code']
+        modifier = m.attrib['modifier']
+        # Note: there is also a "kind" attribute for the Rubric
+        # that we may want to pick up
+        label = m.find('Rubric/Label').text
+        modifier_classes[modifier][code] = label
+        if modifier.endswith('_4'):
+            modifier_types[modifier] = '4_level'
+        else:
+            modifier_types[modifier] = '5_level'
+    modifier_classes = dict(modifier_classes)
+
     # All terms are represented as <Class> elements
     classes = tree.findall('Class')
     nodes = []
@@ -78,27 +101,25 @@ def get_icd10_graph():
             name = name.strip() if name else None
             if name:
                 rubric_data[rubric_kind].append(name)
-        nodes.append([code, {'kind': kind, 'rubrics': dict(rubric_data)}])
+        rubric_data = dict(rubric_data)
+        nodes.append([code, {'kind': kind, 'rubrics': rubric_data}])
         # Some categories reference their subdivisions via ModifiedBy; those subdivisions
         # live in separate Modifier elements rather than as Class elements. Add them.
         modified_by = cls.find('ModifiedBy')
         if modified_by is not None:
             modifier_code = modified_by.attrib['code']
-            # Regex for fourth-character subdivision modifier codes. E.g. S20V60_4
-            is_a_fourth_character_modifier = re.compile(r'^.{6}_4$').match(modifier_code)
-            if kind == 'category' and is_a_fourth_character_modifier:
-                modifiers = tree.findall('Modifier')
-                modifier = None
-                for m in modifiers:
-                    if m.attrib['code'] == modifier_code:
-                        modifier = m
-                        break
-                if modifier is not None:
-                    for subcls in modifier.findall('SubClass'):
-                        sub_code = subcls.attrib['code']
-                        full_code = code + sub_code
-                        nodes.append([full_code, {'kind': kind, 'rubrics': dict(rubric_data)}])
-                        edges.append((full_code, code, {'kind': 'is_a'}))
+            if kind == 'category' and modifier_types[modifier_code] == '4_level':
+                for subclass_code, subclass_label in modifier_classes[modifier_code].items():
+                    preferred_names = []
+                    for name in rubric_data['preferred']:
+                        # The XML defines the subclasses with first letter capitalized
+                        # but on icd10.who.int they are lowercase so we use that convention here
+                        # when generating the names
+                        preferred_names.append(name + ' : ' + subclass_label.lower())
+                    subclass_rubric_data = {'preferred': preferred_names}
+                    full_code = code + subclass_code
+                    nodes.append([full_code, {'kind': 'category', 'rubrics': subclass_rubric_data}])
+                    edges.append((full_code, code, {'kind': 'is_a'}))
     g = nx.DiGraph()
     g.add_nodes_from(nodes)
     g.add_edges_from(edges)
