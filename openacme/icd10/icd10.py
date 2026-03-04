@@ -23,6 +23,7 @@ import zipfile
 from lxml import etree
 from collections import defaultdict
 import networkx as nx
+import re
 
 from .. import OPENACME_BASE
 
@@ -78,7 +79,26 @@ def get_icd10_graph():
             if name:
                 rubric_data[rubric_kind].append(name)
         nodes.append([code, {'kind': kind, 'rubrics': dict(rubric_data)}])
-
+        # Some categories reference their subdivisions via ModifiedBy; those subdivisions
+        # live in separate Modifier elements rather than as Class elements. Add them.
+        modified_by = cls.find('ModifiedBy')
+        if modified_by is not None:
+            modifier_code = modified_by.attrib['code']
+            # Regex for fourth-character subdivision modifier codes. E.g. S20V60_4
+            is_a_fourth_character_modifier = re.compile(r'^.{6}_4$').match(modifier_code)
+            if kind == 'category' and is_a_fourth_character_modifier:
+                modifiers = tree.findall('Modifier')
+                modifier = None
+                for m in modifiers:
+                    if m.attrib['code'] == modifier_code:
+                        modifier = m
+                        break
+                if modifier is not None:
+                    for subcls in modifier.findall('SubClass'):
+                        sub_code = subcls.attrib['code']
+                        full_code = code + sub_code
+                        nodes.append([full_code, {'kind': kind, 'rubrics': dict(rubric_data)}])
+                        edges.append((full_code, code, {'kind': 'is_a'}))
     g = nx.DiGraph()
     g.add_nodes_from(nodes)
     g.add_edges_from(edges)
