@@ -14,31 +14,23 @@ from .icd10 import ICD10_BASE, expand_icd10_range, get_icd10_graph
 ACME_URL = "https://www.cdc.gov/nchs/nvss/manuals/2024/2c-2024-raw.html"
 
 
-def standardize_icd10(raw_code):
+def standardize_icd10(raw_code, replacements):
     """Return standardized ICD10 codes from e.g., A251 to A25.1"""
     # If the code is 3 characters long, just return it. E.g. A25 -> A25
-    if len(raw_code) == 3:
+    if raw_code in replacements:
+        return replacements[raw_code]
+    elif len(raw_code) == 3:
         return raw_code
     # If the code is a letter followed by 3 numbers, we assume
     # that the last number should be separated by a .
     elif len(raw_code) == 4 and raw_code[0].isalpha() \
         and raw_code[1:4].isdigit():
         return f"{raw_code[0]}{raw_code[1:3]}.{raw_code[3]}"
-    # If the code is a letter followed by 4 numbers, and the last number is 0
-    # normalize it. E0390 -> E03.9 
-    # Note: the 5 character subcategories are for use in coding and processing 
-    # multiple cause data; however they do not appear in the official 
-    # tabulations. See the `D. CREATED CODES` section of the `Instructions for 
-    # Classifying the Underlying Cause-of-Death, ICD-10, 2025`. 
-    # From the link: https://www.cdc.gov/nchs/nvss/manuals/2025/2a-2025.html
-    elif len(raw_code) == 5 and raw_code[0].isalpha() and \
-        raw_code[1:4].isdigit() and raw_code[4] == '0':
-        return f"{raw_code[0]}{raw_code[1:3]}.{raw_code[3]}"
     else:
         assert False, f"Unexpected ICD-10 code: {raw_code}"
 
 
-def process_icd10_range(raw_range):
+def process_icd10_range(raw_range, replacements):
     """Process raw ICD10 range strings into tuples.
 
     Example: "A25.1-A25.9" -> ("A25.1", "A25.9")
@@ -46,37 +38,67 @@ def process_icd10_range(raw_range):
     # ('A25.1', 'A25.9')
     parts = raw_range.split('-')
     if len(parts) == 1:
-        code = standardize_icd10(parts[0].strip())
+        code = standardize_icd10(parts[0].strip(), replacements)
         return code
     elif len(parts) == 2:
-        start = standardize_icd10(parts[0].strip())
-        end = standardize_icd10(parts[1].strip())
+        start = standardize_icd10(parts[0].strip(), replacements)
+        end = standardize_icd10(parts[1].strip(), replacements)
         return start, end
     else:
         assert False, f"Unexpected ICD-10 range: {raw_range}"
 
 
-def process_table_d(icd10_graph, soup):
+def _find_table(soup, name):
+    # <p class="H1" data-msection="Section_01" id="em_0010250">Table D<br /> ...
+    for p in soup.find_all("p", class_="H1"):
+        if "Table %s" % name in p.get_text(" ", strip=True):
+            return p
+    return None
+
+
+def process_table_g(soup):
+    """Return code replacements from ACME Table G.
+
+    These represent custom codes that are introduced in ACME but are not real
+    ICD10 codes. They are typically carve-outs of real ICD10 codes with
+    additional exceptions. Later on, we could handle these more explicitly.
+    For now, they are just mapped back to the original ICD10 code.
+    """
+    table_g_header = _find_table(soup, 'G')
+    mappings = {}
+    for tag in table_g_header.find_all_next('p'):
+        classes = tag.get('class')
+        # This is the start of Table F
+        #if class_ == 'H1':
+        #    break
+        if 'H2' in classes:
+            continue
+        elif 'H1' in classes:
+            break
+        mapping_str = tag.get_text(strip=True)
+        # There is an empty one of these
+        if not mapping_str:
+            break
+        source, target = [part.strip()
+                          for part in mapping_str.split(' ', maxsplit=1)]
+        mappings[source] = standardize_icd10(target, replacements={})
+    return mappings
+
+
+def process_table_d(icd10_graph, soup, replacements):
     """Return a graph representation of ACME relations from Table D.
 
     The graph will have nodes for both individual ICD-10 codes and ranges of
     codes, and edges from codes to their associated underlying causes of death.
     """
-    # Find the TableD section
-    # <p class="H1" data-msection="Section_01" id="em_0010250">Table D<br /> ...
-    table_d_header = None
-    for p in soup.find_all("p", class_="H1"):
-        if "Table D" in p.get_text(" ", strip=True):
-            table_d_header = p
-            break
-    if not table_d_header:
-        return
-
+    table_d_header = _find_table(soup, 'D')
     parts = []
     # <p class="H2" data-msection="Section_01" id="em_0010251">A</p>
     current_h2 = None
     # <p class="H3" data-msection="Section_01" id="em_0010252">A000 Address</p>
     current_h3 = None
+    # Skip these h3s since they are nonexistent in the ICD-10 reference
+    skip_h3s = set()
     # Go until the next H1 or end
     for tag in tqdm.tqdm(table_d_header.find_all_next('p')):
         classes = set(tag.get('class') or [])
@@ -86,12 +108,22 @@ def process_table_d(icd10_graph, soup):
         elif 'H2' in classes:
             current_h2 = tag.get_text(" ", strip=True)
             continue
+        # These are the "address" headings
         elif 'H3' in classes:
             current_h3 = standardize_icd10(
-                tag.get_text(" ", strip=True).rstrip(' Address')
+                tag.get_text(" ", strip=True).rstrip(' Address'),
+                replacements=replacements
             )
+            # If we are dealing with a code that is not in ICD-10 (removed or added
+            # across versions, i.e., not one handled explicitly via replacements),
+            # then we skip this part.
+            if current_h3 not in icd10_graph:
+                skip_h3s.add(current_h3)
             continue
+        # These are the rows under each address
         elif 'TableDRow' in classes:
+            if current_h3 in skip_h3s:
+                continue
             # Strip leading and trailing whitespace from the tag text.
             tag_text = tag.get_text(" ", strip=True)
             # Strip leading 'M' when it is followed by whitespace.
@@ -104,7 +136,21 @@ def process_table_d(icd10_graph, soup):
             # Note: The trailing '*' likely is a revision marker from prior 
             # table, not a medically derived categorization.
             tag_text = re.sub(r'\s+\*$', '', tag_text)
-            source = process_icd10_range(tag_text)
+            source = process_icd10_range(tag_text, replacements)
+            # If we are dealing with a single code that isn't in ICD10, we
+            # skip it
+            if source not in icd10_graph and not isinstance(source, tuple):
+                continue
+            # If we are dealing with a range, the beginning or end of which is
+            # not in ICD10 then we adjust the range conservatively to find
+            # the nearest valid code before/after the missing one (dependning
+            # on which end of the interval we are on).
+            if isinstance(source, tuple):
+                range_start, range_end = source
+                if range_start not in icd10_graph:
+                    print(f"Warning: {source[0]}-{source[1]} not found in ICD-10 graph ts")
+                if source[1] not in icd10_graph:
+                    print(f"Warning: {source[0]}-{source[1]} not found in ICD-10 graph tt")
             parts.append({
                 "block": current_h2,
                 "target": current_h3,
@@ -143,8 +189,11 @@ def get_acme_graph():
     # Get the base ICD-10 graph to use for expanding ranges
     g = get_icd10_graph()
 
+    # Process Table G to get replacements used in ACME e.g., E0390 and the
+    # corresponding actual ICD10 code e.g., E03.9.
+    replacements = process_table_g(soup)
     # Process Table D to get the ACME graph
-    acme_g = process_table_d(g, soup)
+    acme_g = process_table_d(g, soup, replacements)
     return acme_g
 
 

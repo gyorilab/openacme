@@ -17,13 +17,15 @@ with decimal points. For example:
 Chapter (I) -> Block (A00-A09) -> Category (A00) -> Category (A00.0)
 """
 __all__ = ['ICD10_BASE', 'ICD10_XML_URL', 'get_icd10_graph',
-           'expand_icd10_range']
+           'expand_icd10_range', 'get_regular_codes', 'icd10_sort_key',
+           'find_next_valid_code', 'find_previous_valid_code']
 
+import bisect
 import zipfile
-from lxml import etree
 from collections import defaultdict
+
+from lxml import etree
 import networkx as nx
-import re
 
 from .. import OPENACME_BASE
 
@@ -32,9 +34,11 @@ ICD10_XML_URL = "https://icdcdn.who.int/icd10/claml/icd102019en.xml.zip"
 
 
 def expand_icd10_range(g, start, end):
-    # Return a list of all codes between e.g.,
-    # ('Y43.1', 'Y43.4') or ('C00.0', 'C97')
-    codes = sorted(g.nodes)
+    """Return a list of all codes between a start and end code.
+
+    Example ranges are e.g., ('Y43.1', 'Y43.4') or ('C00.0', 'C97')
+    """
+    codes = sorted(get_regular_codes(g.nodes), key=icd10_sort_key)
     in_range = []
     in_range_flag = False
     end_is_super_class = ('.' not in end)
@@ -46,6 +50,41 @@ def expand_icd10_range(g, start, end):
         if code == end or (end_is_super_class and code.startswith(end)):
             break
     return in_range
+
+
+def get_regular_codes(g):
+    """Return a list of all regular ICD-10 codes, i.e. those that are not
+    chapters or blocks."""
+    regular_codes = []
+    for code, data in g.nodes(data=True):
+        if data['kind'] == 'category':
+            regular_codes.append(code)
+    return regular_codes
+
+
+def icd10_sort_key(code):
+    """Sort key matching ICD10 linearization.
+
+    The linearization of ICD10 is almost purely lexicographical, with the
+    exception of U-codes that come after Z. So we implement regular
+    sort and make sure that all U codes come after Z.
+    """
+    # Make sure U-codes are sorted after Z-codes
+    if code.startswith('U'):
+        return 'ZZ' + code[1:]
+    else:
+        return code
+
+
+def find_next_valid_code(regular_codes, code):
+    breakpoint()
+    return regular_codes[bisect.bisect_left(regular_codes, code,
+                                            key=icd10_sort_key)]
+
+
+def find_previous_valid_code(regular_codes, code):
+    return regular_codes[bisect.bisect_right(regular_codes, code,
+                                             key=icd10_sort_key) - 1]
 
 
 def get_icd10_graph():

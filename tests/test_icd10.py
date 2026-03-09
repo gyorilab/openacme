@@ -1,4 +1,4 @@
-from openacme.icd10 import get_icd10_graph, expand_icd10_range
+from openacme.icd10 import *
 
 
 def test_expand_range1():
@@ -17,3 +17,25 @@ def test_expand_range2():
     assert 'C50.9' in codes
     assert 'C34.1' in codes
     assert 'C98' not in codes
+
+
+def test_sort_key():
+    assert icd10_sort_key('A00') < icd10_sort_key('B00')
+    assert icd10_sort_key('C00') < icd10_sort_key('C01')
+    assert icd10_sort_key('A00') < icd10_sort_key('A00.1')
+    assert icd10_sort_key('Z99') < icd10_sort_key('U00')
+
+
+def test_valid_code():
+    g = get_icd10_graph()
+    regular_codes = get_regular_codes(g)
+    assert find_next_valid_code(regular_codes, 'U01.0') == 'U04'
+    # Valid codes just return themselves
+    assert find_next_valid_code(regular_codes, 'A92') == 'A92'
+    assert find_previous_valid_code(regular_codes, 'A92') == 'A92'
+    # Non-existent codes return the next/previous valid code
+    assert find_next_valid_code(regular_codes, 'A90') == 'A92'
+    assert find_previous_valid_code(regular_codes, 'A90') == 'A89'
+
+    assert find_next_valid_code(regular_codes, 'D75.2') == 'D75.8'
+    assert find_previous_valid_code(regular_codes, 'D75.2') == 'D75.1'
