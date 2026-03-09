@@ -96,26 +96,23 @@ def get_icd10_graph():
             tree = etree.parse(fh)
 
     # Preprocess modifiers that we can later reference
-    modifier_tags = tree.findall('Modifier')
     modifier_class_tags = tree.findall('ModifierClass')
     modifier_classes = defaultdict(dict)
-    # We differentiate codes that end in _4 and _5 because
-    # _4-level modifiers are used as part of ICD10 codes whereas
-    # _5-level modifiers are supposed to be represented separately from codes.
+    # We differentiate modifiers that start with . and ones that don't
+    # - modifiers starting with . are used as part of ICD10 codes whereas
+    # - modifiers not starting with . are supposed to be represented separately from codes
     modifier_types = {}
     for m in modifier_class_tags:
-        # Note that level 4 codes include a prepended . like .9 whereas
-        # level 5 codes do not contain this period prefix
         code = m.attrib['code']
         modifier = m.attrib['modifier']
         # Note: there is also a "kind" attribute for the Rubric
         # that we may want to pick up
         label = m.find('Rubric/Label').text
         modifier_classes[modifier][code] = label
-        if modifier.endswith('_4'):
-            modifier_types[modifier] = '4_level'
+        if code.startswith('.'):
+            modifier_types[modifier] = 'has_dot'
         else:
-            modifier_types[modifier] = '5_level'
+            modifier_types[modifier] = 'no_dot'
     modifier_classes = dict(modifier_classes)
 
     # All terms are represented as <Class> elements
@@ -143,11 +140,11 @@ def get_icd10_graph():
         rubric_data = dict(rubric_data)
         nodes.append([code, {'kind': kind, 'rubrics': rubric_data}])
         # Some categories reference their subdivisions via ModifiedBy; those subdivisions
-        # live in separate Modifier elements rather than as Class elements. Add them.
+        # live in separate Modifier elements rather than as Class elements
         modified_by = cls.find('ModifiedBy')
         if modified_by is not None:
             modifier_code = modified_by.attrib['code']
-            if kind == 'category' and modifier_types[modifier_code] == '4_level':
+            if kind == 'category' and modifier_types[modifier_code] == 'has_dot':
                 for subclass_code, subclass_label in modifier_classes[modifier_code].items():
                     preferred_names = []
                     for name in rubric_data['preferred']:
