@@ -5,11 +5,10 @@ associated with a given underlying cause of death, which is useful
 for grounding clinical text to causes of death."""
 
 import networkx as nx
-import tqdm
 from bs4 import BeautifulSoup
 import re
 
-from .icd10 import ICD10_BASE, get_icd10_graph, icd10_sort_key, Icd10Graph
+from .icd10 import ICD10_BASE, icd10_sort_key, Icd10Graph
 
 ACME_URL = "https://www.cdc.gov/nchs/nvss/manuals/2024/2c-2024-raw.html"
 
@@ -68,11 +67,10 @@ def process_table_g(soup):
     mappings = {}
     for tag in table_g_header.find_all_next('p'):
         classes = tag.get('class')
-        # This is the start of Table F
-        #if class_ == 'H1':
-        #    break
+        # This is included in find_all_next
         if 'H2' in classes:
             continue
+        # This is the start of Table F
         elif 'H1' in classes:
             break
         mapping_str = tag.get_text(strip=True)
@@ -116,7 +114,7 @@ def process_table_d(icd10_graph, soup, replacements):
     # Skip these h3s since they are nonexistent in the ICD-10 reference
     skip_h3s = set()
     # Go until the next H1 or end
-    for tag in tqdm.tqdm(table_d_header.find_all_next('p')):
+    for tag in table_d_header.find_all_next('p'):
         classes = set(tag.get('class') or [])
         # This would be the next table so we stop
         if 'H1' in classes and tag is not table_d_header:
@@ -176,16 +174,20 @@ def process_table_d(icd10_graph, soup, replacements):
              for n in ({part['target'] for part in parts} |
                        {part['source'] for part in parts})]
     edges = []
+    expanded_ranges = set()
     for part in parts:
         edge = (part['source'], part['target'], {'kind': 'causes'})
         edges.append(edge)
-        if isinstance(part['source'], tuple):
+        if isinstance(part['source'], tuple) and \
+                part['source'] not in expanded_ranges:
             # Expand range
             codes_in_range = icd10_graph.expand_icd10_range(
                 part['source'][0], part['source'][1]
             )
             for code in codes_in_range:
-                edges.append((code, part['source'], {'kind': 'part_of_range'}))
+                edges.append((code, part['source'],
+                              {'kind': 'part_of_range'}))
+            expanded_ranges.add(part['source'])
     g = nx.DiGraph()
     g.add_nodes_from(nodes)
     g.add_edges_from(edges)
