@@ -9,9 +9,7 @@ import tqdm
 from bs4 import BeautifulSoup
 import re
 
-from .icd10 import ICD10_BASE, expand_icd10_range, get_icd10_graph, \
-    get_regular_codes, find_previous_valid_code, find_next_valid_code, \
-    icd10_sort_key
+from .icd10 import ICD10_BASE, get_icd10_graph, icd10_sort_key, Icd10Graph
 
 ACME_URL = "https://www.cdc.gov/nchs/nvss/manuals/2024/2c-2024-raw.html"
 
@@ -87,11 +85,11 @@ def process_table_g(soup):
     return mappings
 
 
-def make_valid_range(range_start, range_end, regular_codes, icd10_graph):
-    if range_start not in icd10_graph:
-        range_start = find_next_valid_code(regular_codes, range_start)
-    if range_end not in icd10_graph:
-        range_end = find_previous_valid_code(regular_codes, range_end)
+def make_valid_range(range_start, range_end, icd10_graph):
+    if range_start not in icd10_graph.graph:
+        range_start = icd10_graph.find_next_valid_code(range_start)
+    if range_end not in icd10_graph.graph:
+        range_end = icd10_graph.find_previous_valid_code(range_end)
     # If the range collapses onto a single code, we just return that
     if range_start == range_end:
         return range_start
@@ -109,7 +107,6 @@ def process_table_d(icd10_graph, soup, replacements):
     The graph will have nodes for both individual ICD-10 codes and ranges of
     codes, and edges from codes to their associated underlying causes of death.
     """
-    regular_codes = get_regular_codes(icd10_graph)
     table_d_header = _find_table(soup, 'D')
     parts = []
     # <p class="H2" data-msection="Section_01" id="em_0010251">A</p>
@@ -136,7 +133,7 @@ def process_table_d(icd10_graph, soup, replacements):
             # If we are dealing with a code that is not in ICD-10 (removed or added
             # across versions, i.e., not one handled explicitly via replacements),
             # then we skip this part.
-            if current_h3 not in icd10_graph:
+            if current_h3 not in icd10_graph.graph:
                 skip_h3s.add(current_h3)
             continue
         # These are the rows under each address
@@ -158,15 +155,15 @@ def process_table_d(icd10_graph, soup, replacements):
             source = process_icd10_range(tag_text, replacements)
             # If we are dealing with a single code that isn't in ICD10, we
             # skip it
-            if source not in icd10_graph and not isinstance(source, tuple):
+            if source not in icd10_graph.graph and \
+                    not isinstance(source, tuple):
                 continue
             # If we are dealing with a range, the beginning or end of which is
             # not in ICD10 then we adjust the range conservatively to find
             # the nearest valid code before/after the missing one (dependning
             # on which end of the interval we are on).
             if isinstance(source, tuple):
-                source = make_valid_range(source[0], source[1],
-                                          regular_codes, icd10_graph)
+                source = make_valid_range(source[0], source[1], icd10_graph)
                 # If the range could not be made valid
                 if source is None:
                     continue
@@ -184,8 +181,8 @@ def process_table_d(icd10_graph, soup, replacements):
         edges.append(edge)
         if isinstance(part['source'], tuple):
             # Expand range
-            codes_in_range = expand_icd10_range(
-                icd10_graph, part['source'][0], part['source'][1]
+            codes_in_range = icd10_graph.expand_icd10_range(
+                part['source'][0], part['source'][1]
             )
             for code in codes_in_range:
                 edges.append((code, part['source'], {'kind': 'part_of_range'}))
@@ -206,7 +203,7 @@ def get_acme_graph():
     soup = BeautifulSoup(acme_text, features='lxml')
 
     # Get the base ICD-10 graph to use for expanding ranges
-    g = get_icd10_graph()
+    g = Icd10Graph()
 
     # Process Table G to get replacements used in ACME e.g., E0390 and the
     # corresponding actual ICD10 code e.g., E03.9.

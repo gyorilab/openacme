@@ -17,10 +17,10 @@ with decimal points. For example:
 Chapter (I) -> Block (A00-A09) -> Category (A00) -> Category (A00.0)
 """
 __all__ = ['ICD10_BASE', 'ICD10_XML_URL', 'get_icd10_graph',
-           'expand_icd10_range', 'get_regular_codes', 'icd10_sort_key',
-           'find_next_valid_code', 'find_previous_valid_code']
+           'icd10_sort_key', 'Icd10Graph']
 
 import bisect
+from functools import lru_cache
 import zipfile
 from collections import defaultdict
 
@@ -33,33 +33,49 @@ ICD10_BASE = OPENACME_BASE.module('icd10')
 ICD10_XML_URL = "https://icdcdn.who.int/icd10/claml/icd102019en.xml.zip"
 
 
-def expand_icd10_range(g, start, end):
-    """Return a list of all codes between a start and end code.
+class Icd10Graph:
+    def __init__(self):
+        self.graph = get_icd10_graph()
+        self.regular_codes = self.get_regular_codes()
 
-    Example ranges are e.g., ('Y43.1', 'Y43.4') or ('C00.0', 'C97')
-    """
-    codes = sorted(get_regular_codes(g.nodes), key=icd10_sort_key)
-    in_range = []
-    in_range_flag = False
-    end_is_super_class = ('.' not in end)
-    for code in codes:
-        if code == start:
-            in_range_flag = True
-        if in_range_flag:
-            in_range.append(code)
-        if code == end or (end_is_super_class and code.startswith(end)):
-            break
-    return in_range
+    @lru_cache(maxsize=None)
+    def expand_icd10_range(self, start, end):
+        """Return a tuple of all codes between a start and end code.
 
+        Example ranges are e.g., ('Y43.1', 'Y43.4') or ('C00.0', 'C97')
+        """
+        in_range = []
+        in_range_flag = False
+        end_is_super_class = ('.' not in end)
+        for code in self.regular_codes:
+            if code == start:
+                in_range_flag = True
+            if in_range_flag:
+                in_range.append(code)
+            if code == end or (end_is_super_class and code.startswith(end)):
+                break
+        return tuple(in_range)
 
-def get_regular_codes(g):
-    """Return a list of all regular ICD-10 codes, i.e. those that are not
-    chapters or blocks."""
-    regular_codes = []
-    for code, data in g.nodes(data=True):
-        if data['kind'] == 'category':
-            regular_codes.append(code)
-    return regular_codes
+    def get_regular_codes(self):
+        """Return a list of all regular ICD-10 codes, i.e. those that are not
+        chapters or blocks."""
+        regular_codes = []
+        for code, data in self.graph.nodes(data=True):
+            if data['kind'] == 'category':
+                regular_codes.append(code)
+        return regular_codes
+
+    def find_next_valid_code(self, code):
+        """Return the next valid code after the given code."""
+        idx = bisect.bisect_left(self.regular_codes, icd10_sort_key(code),
+                                 key=icd10_sort_key)
+        return self.regular_codes[idx]
+
+    def find_previous_valid_code(self, code):
+        """Return the previous valid code before the given code."""
+        idx = bisect.bisect_right(self.regular_codes, icd10_sort_key(code),
+                                  key=icd10_sort_key) - 1
+        return self.regular_codes[idx]
 
 
 def icd10_sort_key(code):
@@ -74,18 +90,6 @@ def icd10_sort_key(code):
         return 'ZZ' + code[1:]
     else:
         return code
-
-
-def find_next_valid_code(regular_codes, code):
-    idx = bisect.bisect_left(regular_codes, icd10_sort_key(code),
-                                            key=icd10_sort_key)
-    return regular_codes[idx]
-
-
-def find_previous_valid_code(regular_codes, code):
-    idx = bisect.bisect_right(regular_codes, icd10_sort_key(code),
-                                             key=icd10_sort_key) - 1
-    return regular_codes[idx]
 
 
 def get_icd10_graph():
