@@ -77,14 +77,15 @@ def icd10_sort_key(code):
 
 
 def find_next_valid_code(regular_codes, code):
-    breakpoint()
-    return regular_codes[bisect.bisect_left(regular_codes, code,
-                                            key=icd10_sort_key)]
+    idx = bisect.bisect_left(regular_codes, icd10_sort_key(code),
+                                            key=icd10_sort_key)
+    return regular_codes[idx]
 
 
 def find_previous_valid_code(regular_codes, code):
-    return regular_codes[bisect.bisect_right(regular_codes, code,
-                                             key=icd10_sort_key) - 1]
+    idx = bisect.bisect_right(regular_codes, icd10_sort_key(code),
+                                             key=icd10_sort_key) - 1
+    return regular_codes[idx]
 
 
 def get_icd10_graph():

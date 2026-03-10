@@ -9,7 +9,9 @@ import tqdm
 from bs4 import BeautifulSoup
 import re
 
-from .icd10 import ICD10_BASE, expand_icd10_range, get_icd10_graph
+from .icd10 import ICD10_BASE, expand_icd10_range, get_icd10_graph, \
+    get_regular_codes, find_previous_valid_code, find_next_valid_code, \
+    icd10_sort_key
 
 ACME_URL = "https://www.cdc.gov/nchs/nvss/manuals/2024/2c-2024-raw.html"
 
@@ -85,12 +87,29 @@ def process_table_g(soup):
     return mappings
 
 
+def make_valid_range(range_start, range_end, regular_codes, icd10_graph):
+    if range_start not in icd10_graph:
+        range_start = find_next_valid_code(regular_codes, range_start)
+    if range_end not in icd10_graph:
+        range_end = find_previous_valid_code(regular_codes, range_end)
+    # If the range collapses onto a single code, we just return that
+    if range_start == range_end:
+        return range_start
+    # We have to handle the corner-case where the range is completely
+    # out of the valid range in which case the new end will be before
+    # the new start
+    elif icd10_sort_key(range_start) > icd10_sort_key(range_end):
+        return None
+    return range_start, range_end
+
+
 def process_table_d(icd10_graph, soup, replacements):
     """Return a graph representation of ACME relations from Table D.
 
     The graph will have nodes for both individual ICD-10 codes and ranges of
     codes, and edges from codes to their associated underlying causes of death.
     """
+    regular_codes = get_regular_codes(icd10_graph)
     table_d_header = _find_table(soup, 'D')
     parts = []
     # <p class="H2" data-msection="Section_01" id="em_0010251">A</p>
@@ -146,11 +165,11 @@ def process_table_d(icd10_graph, soup, replacements):
             # the nearest valid code before/after the missing one (dependning
             # on which end of the interval we are on).
             if isinstance(source, tuple):
-                range_start, range_end = source
-                if range_start not in icd10_graph:
-                    print(f"Warning: {source[0]}-{source[1]} not found in ICD-10 graph ts")
-                if source[1] not in icd10_graph:
-                    print(f"Warning: {source[0]}-{source[1]} not found in ICD-10 graph tt")
+                source = make_valid_range(source[0], source[1],
+                                          regular_codes, icd10_graph)
+                # If the range could not be made valid
+                if source is None:
+                    continue
             parts.append({
                 "block": current_h2,
                 "target": current_h3,
