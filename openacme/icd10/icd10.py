@@ -17,11 +17,14 @@ with decimal points. For example:
 Chapter (I) -> Block (A00-A09) -> Category (A00) -> Category (A00.0)
 """
 __all__ = ['ICD10_BASE', 'ICD10_XML_URL', 'get_icd10_graph',
-           'expand_icd10_range']
+           'icd10_sort_key', 'Icd10Graph']
 
+import bisect
+from functools import lru_cache
 import zipfile
-from lxml import etree
 from collections import defaultdict
+
+from lxml import etree
 import networkx as nx
 
 from .. import OPENACME_BASE
@@ -30,21 +33,63 @@ ICD10_BASE = OPENACME_BASE.module('icd10')
 ICD10_XML_URL = "https://icdcdn.who.int/icd10/claml/icd102019en.xml.zip"
 
 
-def expand_icd10_range(g, start, end):
-    # Return a list of all codes between e.g.,
-    # ('Y43.1', 'Y43.4') or ('C00.0', 'C97')
-    codes = sorted(g.nodes)
-    in_range = []
-    in_range_flag = False
-    end_is_super_class = ('.' not in end)
-    for code in codes:
-        if code == start:
-            in_range_flag = True
-        if in_range_flag:
-            in_range.append(code)
-        if code == end or (end_is_super_class and code.startswith(end)):
-            break
-    return in_range
+class Icd10Graph:
+    def __init__(self):
+        self.graph = get_icd10_graph()
+        self.regular_codes = self.get_regular_codes()
+
+    @lru_cache(maxsize=None)
+    def expand_icd10_range(self, start, end):
+        """Return a tuple of all codes between a start and end code.
+
+        Example ranges are e.g., ('Y43.1', 'Y43.4') or ('C00.0', 'C97')
+        """
+        in_range = []
+        in_range_flag = False
+        end_is_super_class = ('.' not in end)
+        for code in self.regular_codes:
+            if code == start:
+                in_range_flag = True
+            if in_range_flag:
+                in_range.append(code)
+            if code == end or (end_is_super_class and code.startswith(end)):
+                break
+        return tuple(in_range)
+
+    def get_regular_codes(self):
+        """Return a list of all regular ICD-10 codes, i.e. those that are not
+        chapters or blocks."""
+        regular_codes = []
+        for code, data in self.graph.nodes(data=True):
+            if data['kind'] == 'category':
+                regular_codes.append(code)
+        return regular_codes
+
+    def find_next_valid_code(self, code):
+        """Return the next valid code after the given code."""
+        idx = bisect.bisect_left(self.regular_codes, icd10_sort_key(code),
+                                 key=icd10_sort_key)
+        return self.regular_codes[idx]
+
+    def find_previous_valid_code(self, code):
+        """Return the previous valid code before the given code."""
+        idx = bisect.bisect_right(self.regular_codes, icd10_sort_key(code),
+                                  key=icd10_sort_key) - 1
+        return self.regular_codes[idx]
+
+
+def icd10_sort_key(code):
+    """Sort key matching ICD10 linearization.
+
+    The linearization of ICD10 is almost purely lexicographical, with the
+    exception of U-codes that come after Z. So we implement regular
+    sort and make sure that all U codes come after Z.
+    """
+    # Make sure U-codes are sorted after Z-codes
+    if code.startswith('U'):
+        return 'ZZ' + code[1:]
+    else:
+        return code
 
 
 def get_icd10_graph():
@@ -54,6 +99,26 @@ def get_icd10_graph():
         xml_name = zf.namelist()[0]
         with zf.open(xml_name) as fh:
             tree = etree.parse(fh)
+
+    # Preprocess modifiers that we can later reference
+    modifier_class_tags = tree.findall('ModifierClass')
+    modifier_classes = defaultdict(dict)
+    # We differentiate modifiers that start with . and ones that don't
+    # - modifiers starting with . are used as part of ICD10 codes whereas
+    # - modifiers not starting with . are supposed to be represented separately from codes
+    modifier_types = {}
+    for m in modifier_class_tags:
+        code = m.attrib['code']
+        modifier = m.attrib['modifier']
+        # Note: there is also a "kind" attribute for the Rubric
+        # that we may want to pick up
+        label = m.find('Rubric/Label').text
+        modifier_classes[modifier][code] = label
+        if code.startswith('.'):
+            modifier_types[modifier] = 'has_dot'
+        else:
+            modifier_types[modifier] = 'no_dot'
+    modifier_classes = dict(modifier_classes)
 
     # All terms are represented as <Class> elements
     classes = tree.findall('Class')
@@ -77,8 +142,25 @@ def get_icd10_graph():
             name = name.strip() if name else None
             if name:
                 rubric_data[rubric_kind].append(name)
-        nodes.append([code, {'kind': kind, 'rubrics': dict(rubric_data)}])
-
+        rubric_data = dict(rubric_data)
+        nodes.append([code, {'kind': kind, 'rubrics': rubric_data}])
+        # Some categories reference their subdivisions via ModifiedBy; those subdivisions
+        # live in separate Modifier elements rather than as Class elements
+        modified_by = cls.find('ModifiedBy')
+        if modified_by is not None:
+            modifier_code = modified_by.attrib['code']
+            if kind == 'category' and modifier_types[modifier_code] == 'has_dot':
+                for subclass_code, subclass_label in modifier_classes[modifier_code].items():
+                    preferred_names = []
+                    for name in rubric_data['preferred']:
+                        # The XML defines the subclasses with first letter capitalized
+                        # but on icd10.who.int they are lowercase so we use that convention here
+                        # when generating the names
+                        preferred_names.append(name + ' : ' + subclass_label.lower())
+                    subclass_rubric_data = {'preferred': preferred_names}
+                    full_code = code + subclass_code
+                    nodes.append([full_code, {'kind': 'category', 'rubrics': subclass_rubric_data}])
+                    edges.append((full_code, code, {'kind': 'is_a'}))
     g = nx.DiGraph()
     g.add_nodes_from(nodes)
     g.add_edges_from(edges)
