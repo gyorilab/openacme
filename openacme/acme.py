@@ -170,7 +170,7 @@ def process_table_d(icd10_graph, soup, replacements):
                 "target": current_h3,
                 "source": source
             })
-    nodes = {n: (n, {'type': 'range' if isinstance(n, tuple) else 'code'})
+    nodes = {n: (n, {'kind': 'range' if isinstance(n, tuple) else 'category'})
              for n in ({part['target'] for part in parts} |
                        {part['source'] for part in parts})}
     edges = []
@@ -187,7 +187,7 @@ def process_table_d(icd10_graph, soup, replacements):
             for code in codes_in_range:
                 # Add nodes that were only created via expansion
                 if code not in nodes:
-                    nodes[code] = (code, {'type': 'code'})
+                    nodes[code] = (code, {'kind': 'category'})
                 edges.append((code, part['source'],
                               {'kind': 'part_of_range'}))
             expanded_ranges.add(part['source'])
