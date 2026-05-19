@@ -170,9 +170,9 @@ def process_table_d(icd10_graph, soup, replacements):
                 "target": current_h3,
                 "source": source
             })
-    nodes = [(n, {'type': 'range' if isinstance(n, tuple) else 'code'})
+    nodes = {n: (n, {'type': 'range' if isinstance(n, tuple) else 'code'})
              for n in ({part['target'] for part in parts} |
-                       {part['source'] for part in parts})]
+                       {part['source'] for part in parts})}
     edges = []
     expanded_ranges = set()
     for part in parts:
@@ -185,11 +185,14 @@ def process_table_d(icd10_graph, soup, replacements):
                 part['source'][0], part['source'][1]
             )
             for code in codes_in_range:
+                # Add nodes that were only created via expansion
+                if code not in nodes:
+                    nodes[code] = (code, {'type': 'code'})
                 edges.append((code, part['source'],
                               {'kind': 'part_of_range'}))
             expanded_ranges.add(part['source'])
     g = nx.DiGraph()
-    g.add_nodes_from(nodes)
+    g.add_nodes_from(nodes.values())
     g.add_edges_from(edges)
     return g
 
