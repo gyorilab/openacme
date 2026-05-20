@@ -30,12 +30,15 @@ import networkx as nx
 from .. import OPENACME_BASE
 
 ICD10_BASE = OPENACME_BASE.module('icd10')
-ICD10_XML_URL = "https://icdcdn.who.int/icd10/claml/icd102019en.xml.zip"
+ICD10_FILE = 'icd102019en.xml.zip'
+ICD10_XML_URL = f"https://icdcdn.who.int/icd10/claml/{ICD10_FILE}"
 
 
 class Icd10Graph:
-    def __init__(self):
-        self.graph = get_icd10_graph()
+    def __init__(self, icd10_file=None):
+        self.icd10_file = icd10_file if icd10_file \
+            else ICD10_BASE.join(name=ICD10_FILE)
+        self.graph = get_icd10_graph(self.icd10_file)
         self.regular_codes = self.get_regular_codes()
 
     @lru_cache(maxsize=None)
@@ -92,10 +95,12 @@ def icd10_sort_key(code):
         return code
 
 
-def get_icd10_graph():
-    zip_path = ICD10_BASE.ensure(url=ICD10_XML_URL)
+def get_icd10_graph(icd10_file=None):
+    # If no custom file is provided, we use the default one
+    if not icd10_file:
+        icd10_file = ICD10_BASE.ensure(url=ICD10_XML_URL)
 
-    with zipfile.ZipFile(zip_path, 'r') as zf:
+    with zipfile.ZipFile(icd10_file, 'r') as zf:
         xml_name = zf.namelist()[0]
         with zf.open(xml_name) as fh:
             tree = etree.parse(fh)

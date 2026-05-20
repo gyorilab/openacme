@@ -197,10 +197,12 @@ def process_table_d(icd10_graph, soup, replacements):
     return g
 
 
-def get_acme_graph():
+def get_acme_graph(acme_file=None, icd10_file=None):
     """Return a graph representation of ACME Table D."""
-    # This downloads the HTML if not already there or uses a cached version.
-    acme_file = ICD10_BASE.ensure(url=ACME_URL)
+    # If a file is provided, we use it. Otherwise, we download the HTML and cache it.
+    if acme_file is None:
+        # This downloads the HTML if not already there or uses a cached version.
+        acme_file = ICD10_BASE.ensure(url=ACME_URL)
 
     # Parse the HTML and instantiate the soup object
     with open(acme_file, 'r') as fh:
@@ -208,7 +210,7 @@ def get_acme_graph():
     soup = BeautifulSoup(acme_text, features='lxml')
 
     # Get the base ICD-10 graph to use for expanding ranges
-    g = Icd10Graph()
+    g = Icd10Graph(icd10_file=icd10_file)
 
     # Process Table G to get replacements used in ACME e.g., E0390 and the
     # corresponding actual ICD10 code e.g., E03.9.
