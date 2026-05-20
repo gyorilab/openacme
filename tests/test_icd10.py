@@ -1,4 +1,18 @@
+from pathlib import Path
+
 from openacme.icd10 import Icd10Graph, icd10_sort_key
+
+RESOURCES = Path(__file__).parent / 'resources'
+ICD10_FILE = str(RESOURCES / 'icd10_test.xml.zip')
+
+
+def test_icd10_node_kinds():
+    g = Icd10Graph(icd10_file=ICD10_FILE).graph
+    assert g.nodes['I']['kind'] == 'chapter'
+    assert g.nodes['A00-A09']['kind'] == 'block'
+    assert g.nodes['A00.0']['kind'] == 'category'
+    for n, data in g.nodes(data=True):
+        assert data['kind'] in {'chapter', 'block', 'category'}
 
 
 class TestIcd10:

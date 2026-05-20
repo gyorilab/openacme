@@ -1,5 +1,11 @@
+from pathlib import Path
+
 from openacme.icd10 import Icd10Graph
-from openacme.acme import make_valid_range
+from openacme.acme import get_acme_graph, make_valid_range
+
+RESOURCES = Path(__file__).parent / 'resources'
+ACME_FILE = str(RESOURCES / 'acme_test.html')
+ICD10_FILE = str(RESOURCES / 'icd10_test.xml.zip')
 
 
 def test_make_valid_range():
@@ -12,3 +18,26 @@ def test_make_valid_range():
     assert make_valid_range('U01.0', 'U02', g) is None
     assert make_valid_range('A91', 'A92.4', g) == ('A92', 'A92.4')
     assert make_valid_range('B58.0', 'B59', g) == ('B58.0', 'B58.9')
+
+
+def test_acme_node_kinds():
+    g = get_acme_graph(acme_file=ACME_FILE, icd10_file=ICD10_FILE)
+    assert len(g.nodes) > 0
+    for n, data in g.nodes(data=True):
+        if isinstance(n, tuple):
+            assert data['kind'] == 'range'
+        else:
+            assert data['kind'] == 'category'
+
+
+def test_acme_range_expansion_nodes_present():
+    icd10 = Icd10Graph(icd10_file=ICD10_FILE)
+    g = get_acme_graph(acme_file=ACME_FILE, icd10_file=ICD10_FILE)
+    ranges = [n for n, d in g.nodes(data=True) if d['kind'] == 'range']
+    assert ranges
+    for start, end in ranges:
+        expanded = icd10.expand_icd10_range(start, end)
+        assert expanded
+        for code in expanded:
+            assert code in g
+            assert g.nodes[code]['kind'] == 'category'
