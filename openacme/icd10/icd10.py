@@ -36,9 +36,7 @@ ICD10_XML_URL = f"https://icdcdn.who.int/icd10/claml/{ICD10_FILE}"
 
 class Icd10Graph:
     def __init__(self, icd10_file=None):
-        self.icd10_file = icd10_file if icd10_file \
-            else ICD10_BASE.join(name=ICD10_FILE)
-        self.graph = get_icd10_graph(self.icd10_file)
+        self.graph = get_icd10_graph(icd10_file)
         self.regular_codes = self.get_regular_codes()
 
     @lru_cache(maxsize=None)
