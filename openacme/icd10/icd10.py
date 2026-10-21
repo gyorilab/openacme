@@ -47,12 +47,17 @@ class Icd10Graph:
         An end code without a subdivision also covers its subcodes, and the
         start and end bound the range even if they are not codes themselves.
         """
-        start_key, end_key = icd10_sort_key(start), icd10_sort_key(end)
-        end_prefix = end + '.' if '.' not in end else None
-        return tuple(
-            code for code in self.regular_codes
-            if start_key <= icd10_sort_key(code) <= end_key
-            or (end_prefix and code.startswith(end_prefix)))
+        start_key = icd10_sort_key(start)
+        end_key = icd10_sort_key(end)
+        end_has_subcodes = '.' not in end
+        in_range = []
+        for code in self.regular_codes:
+            code_key = icd10_sort_key(code)
+            if start_key <= code_key <= end_key:
+                in_range.append(code)
+            elif end_has_subcodes and code.startswith(end + '.'):
+                in_range.append(code)
+        return tuple(in_range)
 
     def get_regular_codes(self):
         """Return a list of all regular ICD-10 codes, i.e. those that are not
