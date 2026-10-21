@@ -38,6 +38,18 @@ class TestIcd10:
         assert 'C34.1' in codes
         assert 'C98' not in codes
 
+    def test_expand_range_with_subcodes_of_end(self):
+        codes = self.icd10().expand_icd10_range('A40', 'A41')
+        assert 'A41' in codes
+        assert 'A41.9' in codes
+        assert 'A42' not in codes
+
+    def test_expand_range_to_missing_end(self):
+        codes = self.icd10().expand_icd10_range('K40', 'K69')
+        assert 'K40' in codes
+        assert 'K67.8' in codes
+        assert not any(code.startswith('L') for code in codes)
+
     def test_sort_key(self):
         assert icd10_sort_key('A00') < icd10_sort_key('B00')
         assert icd10_sort_key('C00') < icd10_sort_key('C01')
