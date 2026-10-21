@@ -43,18 +43,20 @@ class Icd10Graph:
     def expand_icd10_range(self, start, end):
         """Return a tuple of all codes between a start and end code.
 
-        Example ranges are e.g., ('Y43.1', 'Y43.4') or ('C00.0', 'C97')
+        Example ranges are e.g., ('Y43.1', 'Y43.4') or ('C00.0', 'C97').
+        An end code without a subdivision also covers its subcodes, and the
+        start and end bound the range even if they are not codes themselves.
         """
+        start_key = icd10_sort_key(start)
+        end_key = icd10_sort_key(end)
+        end_has_subcodes = '.' not in end
         in_range = []
-        in_range_flag = False
-        end_is_super_class = ('.' not in end)
         for code in self.regular_codes:
-            if code == start:
-                in_range_flag = True
-            if in_range_flag:
+            code_key = icd10_sort_key(code)
+            if start_key <= code_key <= end_key:
                 in_range.append(code)
-            if code == end or (end_is_super_class and code.startswith(end)):
-                break
+            elif end_has_subcodes and code.startswith(end + '.'):
+                in_range.append(code)
         return tuple(in_range)
 
     def get_regular_codes(self):
